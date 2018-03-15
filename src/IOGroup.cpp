@@ -30,6 +30,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "geopm_arch.h"
 #include "IOGroup.hpp"
 #include "MSRIOGroup.hpp"
 #include "CpuinfoIOGroup.hpp"
@@ -42,8 +43,10 @@ namespace geopm
     static pthread_once_t g_register_built_in_once = PTHREAD_ONCE_INIT;
     static void register_built_in_once(void)
     {
+#ifdef X86
         g_plugin_factory->register_plugin(MSRIOGroup::plugin_name(),
                                           MSRIOGroup::make_plugin);
+#endif
         g_plugin_factory->register_plugin(TimeIOGroup::plugin_name(),
                                           TimeIOGroup::make_plugin);
         g_plugin_factory->register_plugin(CpuinfoIOGroup::plugin_name(),

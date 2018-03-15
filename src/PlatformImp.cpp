@@ -1,4 +1,14 @@
 /*
+ * Copyright 2017, 2018 Science and Technology Facilities Council (UK)
+ * IBM Confidential
+ * OCO Source Materials
+ * 5747-SM3
+ * (c) Copyright IBM Corp. 2017, 2018
+ * The source code for this program is not published or otherwise
+ * divested of its trade secrets, irrespective of what has
+ * been deposited with the U.S. Copyright Office.
+ *
+ * Copyright (c) 2015, 2016, 2017, Intel Corporation
  * Copyright (c) 2015, 2016, 2017, 2018, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
@@ -45,9 +55,16 @@
 #include <fstream>
 #include <iomanip>
 
+#include "geopm_arch.h"
 #include "Exception.hpp"
 #include "PlatformImp.hpp"
 #include "config.h"
+
+#ifdef POWERPC
+#ifndef __NR_perf_event_open
+#define __NR_perf_event_open 319
+#endif
+#endif
 
 namespace geopm
 {
@@ -69,7 +86,7 @@ namespace geopm
         , m_is_initialized(false)
         , M_MSR_SAVE_FILE_PATH("/tmp/geopm-msr-initial-vals-XXXXXX")
     {
-
+      geopm_time(&begin_time);
     }
 
     PlatformImp::PlatformImp(int num_energy_signal, int num_counter_signal, double control_latency, const std::map<std::string, std::pair<off_t, unsigned long> > *msr_map_ptr)
@@ -92,7 +109,7 @@ namespace geopm
         , m_is_initialized(false)
         , M_MSR_SAVE_FILE_PATH("/tmp/geopm-msr-initial-vals-XXXXXX")
     {
-
+      geopm_time(&begin_time);
     }
 
     PlatformImp::PlatformImp(const PlatformImp &other)
@@ -117,6 +134,8 @@ namespace geopm
         , m_batch(other.m_batch)
         , m_trigger_offset(other.m_trigger_offset)
         , m_trigger_value(other.m_trigger_value)
+      , begin_time(other.begin_time)
+      , end_time(other.end_time)
         , m_msr_save_file_path(other.m_msr_save_file_path)
         , m_is_initialized(other.m_is_initialized)
         , M_MSR_SAVE_FILE_PATH(other.M_MSR_SAVE_FILE_PATH)
@@ -142,20 +161,35 @@ namespace geopm
         }
 
         remove(m_msr_save_file_path.c_str());
+
+#ifdef POWERPC
+	for(std::vector<int>::iterator it = m_cpu_other_file_desc.begin();
+	    it != m_cpu_other_file_desc.end();
+	    ++it) {
+	  close(*it);
+	  *it = -1;
+	}
+
+#endif
     }
 
     void PlatformImp::initialize()
     {
         if (!m_is_initialized) {
             parse_hw_topology();
+
+#ifdef X86
             for (int i = 0; i < m_num_logical_cpu; i++) {
                 msr_open(i);
             }
             save_msr_state(M_MSR_SAVE_FILE_PATH.c_str());
+#endif
             msr_initialize();
             m_is_initialized = true;
         }
     }
+
+  
 
     int PlatformImp::num_package(void) const
     {
@@ -309,6 +343,30 @@ namespace geopm
         }
     }
 
+#ifdef POWERPC
+    size_t PlatformImp::pf_event_read_data_size() {
+      /* Structure for reading since we are using FORMAT_GROUP is
+       *
+       * struct read_format {
+       *   uint64_t nr; -> number of counters 
+       *   uint64_t values[nr]; -> values of each counter
+       * }
+       */
+
+      /* number of counters can be retrieved from msr_size */
+      return sizeof(uint64_t) * (msr_size() + 1);
+
+    }      
+
+    void PlatformImp::pf_event_read(int cpu) {
+      int rv = read(m_cpu_file_desc[cpu], m_pf_event_read_data[cpu], pf_event_read_data_size());
+
+      if (rv < 0) {
+	throw Exception("failed to read performance counters", GEOPM_ERROR_MSR_READ, __FILE__, __LINE__);
+      }
+    }
+#endif
+
     off_t PlatformImp::msr_offset(std::string msr_name)
     {
         auto it = m_msr_map_ptr->find(msr_name);
@@ -325,6 +383,24 @@ namespace geopm
             throw Exception("MSR string not found in offset map", GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
         return it->second.second;
+    }
+
+    off_t PlatformImp::msr_offset(int idx) {
+      int i = 0;
+      for(auto it = m_msr_map_ptr->begin(); it != m_msr_map_ptr->end(); ++it) {
+	if(i == idx)
+	  return (*it).second.first;
+
+	++i;
+      }
+
+      char error_string[NAME_MAX];
+      snprintf(error_string, NAME_MAX, "Index %d is out of bounds as map has only %d elements", idx, (i+1));
+      throw Exception(error_string, GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+    }
+
+    size_t PlatformImp::msr_size(void) {
+      return m_msr_map_ptr->size();
     }
 
     void PlatformImp::msr_path(int cpu_num)
@@ -354,6 +430,7 @@ namespace geopm
         throw Exception("checked /dev/cpu/0/msr and /dev/cpu/0/msr_safe", GEOPM_ERROR_MSR_OPEN, __FILE__, __LINE__);
     }
 
+#ifdef X86
     void PlatformImp::msr_open(int cpu)
     {
         int fd;
@@ -379,6 +456,48 @@ namespace geopm
         //all is good, save handle
         m_cpu_file_desc.push_back(fd);
     }
+#elif defined(POWERPC)
+    int PlatformImp::perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu, int group_fd, unsigned long flags)
+    {
+	return (syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags));
+    }    
+
+    void PlatformImp::pf_event_open(int cpu) 
+    {
+      size_t counters = msr_size();
+      int *fds = (int*) calloc(counters, sizeof(int));
+      fds[0] = -1;
+
+      for(size_t i = 0; i < counters; ++i) {
+	perf_event_attr perf_attr;
+
+	memset(&perf_attr, 0, sizeof(struct perf_event_attr));
+
+	perf_attr.type = 0x4; 
+	perf_attr.size = sizeof(struct perf_event_attr);
+	perf_attr.config = msr_offset(i);
+	if(i == 0)
+	  perf_attr.disabled = 1;
+
+	//perf_attr.pinned = i == 0 ? 1 : 0;
+	perf_attr.read_format = PERF_FORMAT_GROUP;
+
+	fds[i] = perf_event_open(&perf_attr, -1, cpu, fds[0], 0);
+	if(fds[i] < 0) {
+	  char error_string[NAME_MAX];
+	  snprintf(error_string, NAME_MAX, "failed to open counter %lu on CPU %d", i, cpu);
+	  throw Exception(error_string, GEOPM_ERROR_MSR_OPEN, __FILE__, __LINE__);
+ 	}
+
+	if(i > 0)
+	  m_cpu_other_file_desc.push_back(fds[i]);
+      }
+
+      m_cpu_file_desc.push_back(fds[0]);
+
+      free(fds);
+    }
+#endif
 
     void PlatformImp::msr_close(int cpu)
     {

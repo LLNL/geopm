@@ -31,7 +31,9 @@
  */
 
 #include <inttypes.h>
+#ifdef X86
 #include <cpuid.h>
+#endif
 #include <string>
 #include <sstream>
 #include <dlfcn.h>

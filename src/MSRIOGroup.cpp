@@ -30,7 +30,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef X86
 #include <cpuid.h>
+#endif
 #include <cmath>
 #include <sstream>
 #include <algorithm>
@@ -409,6 +411,9 @@ namespace geopm
 
     int MSRIOGroup::cpuid(void) const
     {
+#ifdef POWERPC
+       return 12;
+#elif X86
         uint32_t key = 1; //processor features
         uint32_t proc_info = 0;
         uint32_t model;
@@ -437,6 +442,9 @@ namespace geopm
         }
 
         return ((family << 8) + model);
+#else
+	return -1;
+#endif
     }
 
     void MSRIOGroup::activate(void)

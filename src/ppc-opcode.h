@@ -8,9 +8,6 @@
  * divested of its trade secrets, irrespective of what has
  * been deposited with the U.S. Copyright Office.
  *
- * Copyright (c) 2015, 2016, 2017, Intel Corporation
- * Copyright (c) 2015, 2016, 2017, 2018, Intel Corporation
- *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -39,76 +36,27 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY LOG OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef GEOPM_HASH_H_INCLUDE
-#define GEOPM_HASH_H_INCLUDE
-#endif
 
-#include "geopm_arch.h"
+#ifndef __OPCODES_H
+#define __OPCODES_H
 
-#include <stdint.h>
-#ifdef X86
-#include <smmintrin.h>
-#endif
-#include <string.h>
+#define __PPC_RA(a)		(((a) & 0x1f) << 16)
+#define __PPC_RB(b)		(((b) & 0x1f) << 11)
+#define __PPC_XA(a)		((((a) & 0x1f) << 16) | (((a) & 0x20) >> 3))
+#define __PPC_XB(b)		((((b) & 0x1f) << 11) | (((b) & 0x20) >> 4))
+#define __PPC_XS(s)		((((s) & 0x1f) << 21) | (((s) & 0x20) >> 5))
+#define __PPC_XT(s)		__PPC_XS(s)
+#define VSX_XX3(t, a, b)	(__PPC_XT(t) | __PPC_XA(a) | __PPC_XB(b))
+#define VSX_XX1(s, a, b)	(__PPC_XS(s) | __PPC_RA(a) | __PPC_RB(b))
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-#ifdef POWERPC
-unsigned int crc32_vpmsum(unsigned int crc, unsigned char *p, unsigned long len);
-#endif
+#define PPC_INST_VPMSUMW	0x10000488
+#define PPC_INST_VPMSUMD	0x100004c8
+#define PPC_INST_MFVSRD		0x7c000066
+#define PPC_INST_MTVSRD		0x7c000166
 
-static inline uint64_t geopm_crc32_u64(uint64_t begin, uint64_t key)
-{
-#ifdef X86
-  return _mm_crc32_u64(begin, key);
-#elif defined(POWERPC)
-  unsigned char key_c[9];
-  int pos = 0;
+#define VPMSUMW(t, a, b)	.long PPC_INST_VPMSUMW | VSX_XX3((t), a, b)
+#define VPMSUMD(t, a, b)	.long PPC_INST_VPMSUMD | VSX_XX3((t), a, b)
+#define MFVRD(a, t)		.long PPC_INST_MFVSRD | VSX_XX1((t)+32, a, 0)
+#define MTVRD(t, a)		.long PPC_INST_MTVSRD | VSX_XX1((t)+32, a, 0)
 
-  while(key != 0) {
-    key_c[pos++] = key & 0xFF;
-    key >>= sizeof(uint64_t);
-  }
-  key_c[pos] = '\0';
-
-  return crc32_vpmsum(begin, key_c, pos);
-#else
-  // TODO: Implement generic version without speed-up obtainable with
-  //
-  //
-  // architectures
-  assert(0);
-#endif
-
-}
-
-uint64_t geopm_crc32_str(uint64_t begin, const char *key);
-
-/// @brief Convert a signal that is implicitly a 64-bit field
-///        especially useful for converting region IDs.
-/// @param [in] signal value returned by PlatformIO::sample() or
-///        PlatformIO::read_signal() for a signal with a name that
-///        ends with the '#' character.
-static inline uint64_t geopm_signal_to_field(double signal)
-{
-    uint64_t result;
-    memcpy(&result, &signal, sizeof(result));
-    return result;
-}
-
-/// @brief Convert a 64-bit field into a double representation
-///        appropriate for a signal returned by an IOGroup.
-/// @param [in] field Arbitrary 64-bit field to be stored in a
-///        double precision value.
-static inline double geopm_field_to_signal(uint64_t field)
-{
-    double result;
-    memcpy(&result, &field, sizeof(result));
-    return result;
-}
-
-#ifdef __cplusplus
-}
 #endif

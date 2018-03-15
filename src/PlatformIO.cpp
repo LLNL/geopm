@@ -30,7 +30,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef X86
 #include <cpuid.h>
+#endif
 #include <iomanip>
 #include <cmath>
 #include <algorithm>

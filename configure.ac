@@ -1,3 +1,13 @@
+#  Copyright 2017, 2018 Science and Technology Facilities Council (UK)
+#  IBM Confidential
+#  OCO Source Materials
+#  5747-SM3
+#  (c) Copyright IBM Corp. 2017, 2018
+#  The source code for this program is not published or otherwise
+#  divested of its trade secrets, irrespective of what has
+#  been deposited with the U.S. Copyright Office.
+#
+#  Copyright (c) 2015, 2016, 2017, Intel Corporation
 #  Copyright (c) 2015, 2016, 2017, 2018, Intel Corporation
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -262,9 +272,15 @@ if test "x$enable_fortran" = "x1"; then
 fi
 fi
 
+AC_LANG_PUSH([C])
+AC_OPENMP()
+AC_LANG_POP([C])
 AC_LANG_PUSH([C++])
 AC_OPENMP()
 AC_LANG_POP([C++])
+AC_LANG_PUSH([Fortran])
+AC_OPENMP()
+AC_LANG_POP([Fortran])
 
 
 [MPI_FCFLAGS=$MPI_FFLAGS]
@@ -313,11 +329,26 @@ AC_SUBST([MPI_LIBS])
 AC_SUBST([MPI_FCLIBS])
 AC_SUBST([MPI_FLIBS])
 
-[EXTRA_CFLAGS="$EXTRA_CFLAGS $OPENMP_CXXFLAGS -std=c99 -msse4.2"]
-[EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS $OPENMP_CXXFLAGS -std=c++11 -msse4.2"]
-[EXTRA_FFLAGS="$EXTRA_FFLAGS $OPENMP_CXXFLAGS -msse4.2"]
-[EXTRA_FCFLAGS="$EXTRA_FCFLAGS $OPENMP_CXXFLAGS -msse4.2"]
-[EXTRA_LDFLAGS="$EXTRA_LDFLAGS $OPENMP_CXXFLAGS"]
+AC_CANONICAL_HOST
+VECTOR_CPPFLAGS=""
+AVX_CPPFLAGS=""
+AS_CASE([$host_cpu],
+	[x86_64],	
+	[
+	  VECTOR_CPPFLAGS="-msse4.2"
+	  AVX_CPPFLAGS="-mavx"
+	],
+	[powerpc64le],
+	[
+	  VECTOR_CPPFLAGS="-maltivec"
+        ])
+
+[EXTRA_CFLAGS="$EXTRA_CFLAGS $OPENMP_CFLAGS -std=c99 $VECTOR_CPPFLAGS"]
+[EXTRA_CXXFLAGS="$EXTRA_CXXFLAGS $OPENMP_CXXFLAGS -std=c++11 $VECTOR_CPPFLAGS"]
+[EXTRA_FFLAGS="$EXTRA_FFLAGS $OPENMP_FFLAGS $VECTOR_CPPFLAGS"]
+[EXTRA_FCFLAGS="$EXTRA_FCFLAGS $OPENMP_FCFLAGS $VECTOR_CPPFLAGS"]
+
+[EXTRA_LDFLAGS="$EXTRA_LDFLAGS"]
 
 
 [LDFLAGS_SAVE="$LDFLAGS"]
@@ -345,6 +376,7 @@ AC_PROG_F77
 fi
 AC_PROG_MAKE_SET
 m4_pattern_allow([AM_PROG_AR])
+AM_PROG_AS
 AM_PROG_AR
 AM_PROG_CC_C_O
 LT_INIT

@@ -1,4 +1,13 @@
 /*
+ * Copyright 2017, 2018 Science and Technology Facilities Council (UK)
+ * IBM Confidential
+ * OCO Source Materials
+ * 5747-SM3
+ * (c) Copyright IBM Corp. 2017, 2018
+ * The source code for this program is not published or otherwise
+ * divested of its trade secrets, irrespective of what has
+ * been deposited with the U.S. Copyright Office.
+ *
  * Copyright (c) 2015, 2016, 2017, 2018, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
@@ -52,6 +61,7 @@
 
 #include "geopm.h"
 #include "geopm_env.h"
+#include "geopm_arch.h"
 #include "geopm_version.h"
 #include "geopm_signal_handler.h"
 #include "geopm_hash.h"
@@ -238,12 +248,21 @@ namespace geopm
                     case GEOPM_POLICY_MODE_PERF_BALANCE_DYNAMIC:
                         snprintf(plugin_desc.tree_decider, NAME_MAX, "power_balancing");
                         snprintf(plugin_desc.leaf_decider, NAME_MAX, "power_governing");
+#ifdef POWERPC
+			snprintf(plugin_desc.platform, NAME_MAX, "occ");
+#else
                         snprintf(plugin_desc.platform, NAME_MAX, "rapl");
+#endif
                         break;
                     case GEOPM_POLICY_MODE_STATIC:
                         snprintf(plugin_desc.tree_decider, NAME_MAX, "static_policy");
                         snprintf(plugin_desc.leaf_decider, NAME_MAX, "static_policy");
+#ifdef POWERPC
+			snprintf(plugin_desc.platform, NAME_MAX, "occ");
+#else
                         snprintf(plugin_desc.platform, NAME_MAX, "rapl");
+#endif
+
                         break;
                     case GEOPM_POLICY_MODE_DYNAMIC:
                         strncpy(plugin_desc.tree_decider, m_global_policy->tree_decider().c_str(), NAME_MAX -1);
@@ -307,6 +326,16 @@ namespace geopm
             m_platform = m_platform_factory->platform(plugin_desc.platform, true);
             m_msr_sample.resize(m_platform->capacity());
 
+            m_platform->sample(m_msr_sample);
+            m_app_start_time = m_msr_sample[0].timestamp;
+            for (auto it = m_msr_sample.begin(); it != m_msr_sample.end(); ++it) {
+                if ((*it).domain_type == GEOPM_DOMAIN_PACKAGE &&
+                    ((*it).signal_type == GEOPM_TELEMETRY_TYPE_DRAM_ENERGY ||
+                     (*it).signal_type == GEOPM_TELEMETRY_TYPE_PKG_ENERGY)) {
+                    m_counter_energy_start += (*it).signal;
+                }
+            }
+
             double upper_bound;
             double lower_bound;
             m_platform->bound(upper_bound, lower_bound);
@@ -356,6 +385,7 @@ namespace geopm
                 }
             }
 
+	    
             // Barrier to ensure all ProfileSamplers are created at the same time.
             m_ppn1_comm->barrier();
             m_sampler = new ProfileSampler(M_SHMEM_REGION_SIZE);
@@ -377,6 +407,7 @@ namespace geopm
             m_ppn1_comm->broadcast(header_vec.data(), header_size, 0);
 
             m_tracer = new Tracer(header_vec.data());
+
         }
     }
 
@@ -731,7 +762,6 @@ namespace geopm
                         is_exit_found = false;
                     }
                 }
-
                 m_platform->transform_rank_data(region_id_all, m_msr_sample[0].timestamp, aligned_signal, m_telemetry_sample);
                 m_rid_regulator_map[geopm_region_id_unset_mpi(m_telemetry_sample[0].region_id)].insert_runtime_signal(m_telemetry_sample);
 

@@ -1,3 +1,12 @@
+#  Copyright 2017, 2018 Science and Technology Facilities Council (UK)
+#  IBM Confidential
+#  OCO Source Materials
+#  5747-SM3
+#  (c) Copyright IBM Corp. 2017, 2018
+#  The source code for this program is not published or otherwise
+#  divested of its trade secrets, irrespective of what has
+#  been deposited with the U.S. Copyright Office.
+#
 #  Copyright (c) 2015, 2016, 2017, 2018, Intel Corporation
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -223,9 +232,9 @@ if HAVE_ICPC
     geopmbench_CFLAGS = $(AM_CFLAGS) $(MPI_CFLAGS) -DTUTORIAL_ENABLE_MKL -D_GNU_SOURCE -std=c99 -xAVX
     geopmbench_CXXFLAGS = $(AM_CXXFLAGS) $(MPI_CFLAGS) -DTUTORIAL_ENABLE_MKL -D_GNU_SOURCE -std=c++11
 else
-    geopmbench_LDFLAGS = $(AM_LDFLAGS) $(MPI_LDFLAGS) -lm -mavx
-    geopmbench_CFLAGS = $(AM_CFLAGS) $(MPI_CFLAGS) -std=gnu11 -mavx
-    geopmbench_CXXFLAGS = $(AM_CXXFLAGS) $(MPI_CFLAGS) -std=gnu++11 -mavx
+    geopmbench_LDFLAGS = $(AM_LDFLAGS) $(MPI_LDFLAGS) -lm $(AVX_CPPFLAGS)
+    geopmbench_CFLAGS = $(AM_CFLAGS) $(MPI_CFLAGS) -std=gnu11 $(AVX_CPPFLAGS)
+    geopmbench_CXXFLAGS = $(AM_CXXFLAGS) $(MPI_CFLAGS) -std=gnu++11 $(AVX_CPPFLAGS)
 endif
 
 if ENABLE_FORTRAN
@@ -319,6 +328,8 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/PolicyFlags.hpp \
                             src/Profile.cpp \
                             src/Profile.hpp \
+                            src/PowerPlatformImp.cpp \
+                            src/PowerPlatformImp.hpp \
                             src/ProfileIOSample.cpp \
                             src/ProfileIOSample.hpp \
                             src/ProfileIOGroup.cpp \
@@ -331,6 +342,8 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/ProfileSampler.hpp \
                             src/RAPLPlatform.cpp \
                             src/RAPLPlatform.hpp \
+                            src/OCCPlatform.cpp \
+                            src/OCCPlatform.hpp \
                             src/Region.cpp \
                             src/Region.hpp \
                             src/RuntimeRegulator.cpp \
@@ -354,6 +367,11 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/XeonPlatformImp.hpp \
                             contrib/json11/json11.cpp \
                             contrib/json11/json11.hpp \
+                            src/crc32.S \
+                            src/crc32_wrapper.c \
+                            src/crc32_constants.h \
+                            src/ppc-opcode.h \
+                            src/geopm_arch.h \
                             # end
 
 geopmpolicy_SOURCES = src/geopmpolicy_main.c \

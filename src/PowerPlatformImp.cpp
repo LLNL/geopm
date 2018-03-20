@@ -420,7 +420,7 @@ namespace geopm
 
     nvmlDeviceGetCount(&m_total_unit_devices);
     m_unit_devices_file_desc = (nvmlDevice_t*) malloc(sizeof(nvmlDevice_t) * m_total_unit_devices);
-    
+
     /* get handles to all devices */
     for(unsigned int d = 0; d < m_total_unit_devices; ++d) {
       int power;
@@ -458,7 +458,6 @@ namespace geopm
     for(int c = 0; c < m_num_logical_cpu; ++c) {
       ioctl(m_cpu_file_desc[c], PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
     }
-    
   }
 
   void PowerPlatformImp::pf_event_reset() {

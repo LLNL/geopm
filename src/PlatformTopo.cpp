@@ -224,9 +224,30 @@ namespace geopm
         int num_core = values[2] * num_package;
         core_per_package = num_core / num_package;
         thread_per_core = values[1];
-        if (num_package * core_per_package * thread_per_core != values[0]) {
-            throw Exception("PlatformTopo: parsing lscpu output, inconsistent values or some CPUs are not online",
-                            GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+
+	int total_cores = num_package * core_per_package * thread_per_core;
+        if (total_cores != values[0]) {
+	    /* check now how many CPUs are actually online */
+	    const std::string online_cpus_string = "On-line CPU(s) mask";
+	    auto it = lscpu_map.find(online_cpus_string);
+	    if(it == lscpu_map.end()) 
+	      throw Exception("PlatformTopo: parsing lscpu output, key not found: \"" + online_cpus_string + "\"",
+			      GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+	    const std::string online_cpus_mask = it->second;
+
+	    /* read backwards until we reach 'x' */
+	    int idx = online_cpus_mask.length() - 1;
+	    int online_cpus = 0;
+	    while(online_cpus_mask.at(idx) != 'x') {
+	      const char m = online_cpus_mask.at(idx--);
+	      int mask =  atoi(&m);
+	      for(int i = 0; i < 4; ++i)
+		online_cpus += (mask >> i) & 0x1;
+	    }
+	    
+	    if(total_cores != online_cpus)
+	      throw Exception("PlatformTopo: parsing lscpu output, inconsistent values or some CPUs are not online",
+			      GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
         }
     }
 

@@ -47,6 +47,7 @@
 #include <errno.h>
 
 #include "geopm.h"
+#include "geopm_arch.h"
 #include "geopm_message.h"
 #include "geopm_time.h"
 #include "geopm_signal_handler.h"
@@ -156,7 +157,11 @@ namespace geopm
         }
 
         cpu_set_t *proc_cpuset = NULL;
+#ifdef POWERPC
+        int num_cpu = geopm_sched_cpu_conf();
+#else
         int num_cpu = geopm_sched_num_cpu();
+#endif
         proc_cpuset = CPU_ALLOC(num_cpu);
         if (!proc_cpuset) {
             throw Exception("Profile: unable to allocate process CPU mask",

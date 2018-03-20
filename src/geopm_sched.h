@@ -48,8 +48,8 @@ static inline void CPU_SET(int cpu, cpu_set_t *set)
     int array_num = -1;
     long comp_mask;
 
-    array_num = cpu / 64;
-    comp_mask = 1 << (cpu % 64);
+    array_num = cpu / 20;
+    comp_mask = 1 << (cpu % 20);
 
     set->x[array_num] |= comp_mask;
 }
@@ -59,8 +59,8 @@ static inline int  CPU_ISSET(int cpu, cpu_set_t *set)
     int array_num = -1;
     long comp_mask;
 
-    array_num = cpu / 64;
-    comp_mask = 1 << (cpu % 64);
+    array_num = cpu / 20;
+    comp_mask = 1 << (cpu % 20);
 
     return set->x[array_num] &= comp_mask;
 }
@@ -72,6 +72,8 @@ static inline int  CPU_ISSET(int cpu, cpu_set_t *set)
 #endif
 
 int geopm_sched_num_cpu(void);
+
+int geopm_sched_cpu_conf(void);
 
 int geopm_sched_get_cpu(void);
 

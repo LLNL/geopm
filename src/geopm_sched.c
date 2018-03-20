@@ -49,6 +49,7 @@
 #include <string.h>
 #include <signal.h>
 
+#include "geopm_arch.h"
 #include "geopm_sched.h"
 #include "geopm_error.h"
 #include "config.h"
@@ -97,6 +98,11 @@ int geopm_sched_popen(const char *cmd, FILE **fid)
 int geopm_sched_num_cpu(void)
 {
     return sysconf(_SC_NPROCESSORS_ONLN);
+}
+
+int geopm_sched_cpu_conf(void)
+{
+    return sysconf(_SC_NPROCESSORS_CONF);
 }
 
 int geopm_sched_get_cpu(void)
@@ -174,7 +180,11 @@ int geopm_sched_proc_cpuset_helper(int num_cpu, uint32_t *proc_cpuset, FILE *fid
 static void geopm_proc_cpuset_once(void)
 {
     const char *status_path = "/proc/self/status";
+#ifdef POWERPC
+    const int num_cpu = geopm_sched_cpu_conf();
+#else
     const int num_cpu = geopm_sched_num_cpu();
+#endif
     const int num_read = num_cpu / 32 + (num_cpu % 32 ? 1 : 0);
 
     int err = 0;
@@ -221,7 +231,12 @@ static void geopm_proc_cpuset_once(void)
 static void *geopm_proc_cpuset_pthread(void *arg)
 {
     void *result = NULL;
+#ifdef POWERPC
+    int err = sched_getaffinity(0, CPU_ALLOC_SIZE(geopm_sched_cpu_conf()), g_proc_cpuset);
+#else
     int err = sched_getaffinity(0, CPU_ALLOC_SIZE(geopm_sched_num_cpu()), g_proc_cpuset);
+#endif
+
     if (err) {
         result = (void *)(size_t)(errno ? errno : GEOPM_ERROR_RUNTIME);
     }
@@ -231,7 +246,11 @@ static void *geopm_proc_cpuset_pthread(void *arg)
 static void geopm_proc_cpuset_once(void)
 {
     int err = 0;
+#ifdef POWERPC
+    int num_cpu = geopm_sched_cpu_conf();
+#else
     int num_cpu = geopm_sched_num_cpu();
+#endif
     pthread_t tid;
     pthread_attr_t attr;
 
@@ -275,7 +294,11 @@ static void geopm_proc_cpuset_once(void)
 int geopm_sched_proc_cpuset(int num_cpu, cpu_set_t *proc_cpuset)
 {
     int err = pthread_once(&g_proc_cpuset_once, geopm_proc_cpuset_once);
+#ifdef POWERPC
+    int sched_num_cpu = geopm_sched_cpu_conf();
+#else
     int sched_num_cpu = geopm_sched_num_cpu();
+#endif
     if (!err && sched_num_cpu > num_cpu) {
         err = GEOPM_ERROR_INVALID;
     }

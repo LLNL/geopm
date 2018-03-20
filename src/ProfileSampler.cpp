@@ -48,6 +48,7 @@
 #include <errno.h>
 
 #include "geopm.h"
+#include "geopm_arch.h"
 #include "geopm_message.h"
 #include "geopm_time.h"
 #include "geopm_signal_handler.h"
@@ -136,13 +137,17 @@ namespace geopm
     void ProfileSampler::cpu_rank(std::vector<int> &cpu_rank)
     {
         uint32_t num_cpu = geopm_sched_num_cpu();
+        unsigned cpu_multiplier = 1;
+#ifdef POWERPC
+        cpu_multiplier = geopm_sched_cpu_conf()/(unsigned)num_cpu;
+#endif
         cpu_rank.resize(num_cpu);
         if (num_cpu > GEOPM_MAX_NUM_CPU) {
             throw Exception("ProfileSampler::cpu_rank: Number of online CPUs is greater than GEOPM_MAX_NUM_CPU", GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
         }
 
         for (unsigned cpu = 0; cpu < num_cpu; ++cpu) {
-            cpu_rank[cpu] = m_ctl_msg->cpu_rank(cpu);
+            cpu_rank[cpu] = m_ctl_msg->cpu_rank(cpu*cpu_multiplier);
         }
     }
 

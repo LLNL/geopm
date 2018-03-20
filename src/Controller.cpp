@@ -755,7 +755,10 @@ namespace geopm
                                       m_region_id);
                 m_profile_io_sample->update(m_prof_sample.cbegin(), m_prof_sample.cbegin() + length);
                 // Determine if all ranks were last sampled from the same region
-                uint64_t region_id_all = m_region_id[0];
+                uint64_t region_id_all = GEOPM_REGION_ID_UNMARKED;
+                if(m_region_id.size() > 0) {
+                    region_id_all = m_region_id[0];
+                }
                 for (auto it = m_region_id.begin(); it != m_region_id.end(); ++it) {
                     if (*it != region_id_all) {
                         region_id_all = GEOPM_REGION_ID_UNMARKED;

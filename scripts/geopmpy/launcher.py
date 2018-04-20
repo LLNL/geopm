@@ -1056,7 +1056,7 @@ class MPIExecLauncher(Launcher):
 
         parser = SubsetOptionParser()
         parser.add_option('-n', dest='num_rank', nargs=1, type='int')
-        parser.add_option('--hosts', dest='node_list', nargs=1, type='string')
+        parser.add_option('--host', dest='node_list', nargs=1, type='string')
         parser.add_option('-f', '--hostfile', dest='host_file', nargs=1, type='string')
 
         opts, self.argv_unparsed = parser.parse_args(self.argv_unparsed)
@@ -1078,6 +1078,8 @@ class MPIExecLauncher(Launcher):
                 for line in lines:
                     if len(line) > 0:
                         self.num_node += 1
+        elif self.node_list:
+            self.num_node = len(self.node_list.split(','))
         else:
             self.num_node = 1
             
@@ -1138,10 +1140,16 @@ class MPIExecLauncher(Launcher):
             aff_list = self.affinity_list(is_geopmctl)
             
             hostnames = []
-            with open(self.host_file) as f:
-                lines = f.readlines()
-                for line in lines:
-                    hostnames.append(line.split(' ')[0])
+            if self.host_file:
+                with open(self.host_file) as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        hostnames.append(line.split(' ')[0].strip('\n'))
+            elif self.node_list:
+                hostnames = [host.strip('\n') for host in self.node_list.split(',')]
+            else:
+                hostname = socket.gethostname()
+                hostnames = [hostname]            
 
             rank = 0
             new_file, filename = tempfile.mkstemp()
@@ -1149,9 +1157,9 @@ class MPIExecLauncher(Launcher):
             for host in hostnames:
                 for cpu_set in aff_list:
                     for cpu in cpu_set:
-                        socket = cpu // self.core_per_socket
+                        socket_num = cpu // self.core_per_socket
                         processor = cpu % self.core_per_socket
-                        line = 'rank ' + str(rank) + '=' + host + ' slot=' + str(socket) + ':' + str(processor)
+                        line = 'rank ' + str(rank) + '=' + host + ' slot=' + str(socket_num) + ':' + str(processor)
                         rank += 1
                         os.write(new_file, line)
                         os.write(new_file, '\n')
@@ -1182,7 +1190,11 @@ class MPIExecLauncher(Launcher):
 
         result = []
         if self.node_list is not None:
-            result = ['--hosts', self.node_list]
+            nodes = self.node_list.split(',')
+            node_list = []
+            for node in nodes:
+                node_list.append(node + ':' + str(self.rank_per_node))            
+            result = ['--host', ','.join(node_list)]
         elif self.host_file is not None:
             result = ['--hostfile', self.host_file]
         return result

@@ -52,6 +52,7 @@ import itertools
 import glob
 import re
 import tempfile
+import uuid
 
 from geopmpy import __version__
 
@@ -82,6 +83,8 @@ def resource_manager():
             result = 'SLURM'
         elif sys.argv[0].endswith('aprun'):
             result = 'ALPS'
+        elif sys.argv[0].endswith('bsub'):
+            result = 'LSF'
         elif any(hostname.startswith(word) for word in slurm_hosts):
             result = 'SLURM'
         elif any(hostname.startswith(word) for word in alps_hosts):
@@ -117,6 +120,9 @@ def factory(argv, num_rank=None, num_node=None, cpu_per_rank=None, timeout=None,
                             time_limit, job_name, node_list, host_file)
     elif rm == 'ALPS' or rm == 'AprunLauncher':
         return AprunLauncher(argv[1:], num_rank, num_node, cpu_per_rank, timeout,
+                             time_limit, job_name, node_list, host_file)
+    elif rm == 'LSF' or rm == 'BsubLauncher':
+        return BsubLauncher(argv[1:], num_rank, num_node, cpu_per_rank, timeout,
                              time_limit, job_name, node_list, host_file)
     elif rm == 'IMPI' or rm == 'IMPIExecLauncher':
         return IMPIExecLauncher(argv[1:], num_rank, num_node, cpu_per_rank, timeout,
@@ -386,6 +392,7 @@ class Config(object):
                 (rm == 'AprunLauncher' and self.rm == 'ALPS') or
                 (rm == 'SrunLauncher' and self.rm == 'SLURM') or
                 (rm == 'IMPIExecLauncher' and self.rm == 'IMPI') or
+                (rm == 'BsubLauncher' and self.rm == 'LSF') or
                 (rm == 'MPIExecLauncher' and self.rm == 'MPI')):
             raise RuntimeError('Launcher mismatch: --geopm-rm command line option has been handled incorrectly.')
 
@@ -812,6 +819,207 @@ class Launcher(object):
         """
         raise NotImplementedError('Launcher.get_alloc_nodes() undefined in the base class')
 
+class BsubLauncher(Launcher):
+    """
+    Launcher derived object for use with the LSF job launch
+    application bsub.
+    """
+    def __init__(self, argv, num_rank=None, num_node=None, cpu_per_rank=None, timeout=None,
+                 time_limit=None, job_name=None, node_list=None, host_file=None):
+        """
+        Pass through to Launcher constructor.
+        """
+        super(BsubLauncher, self).__init__(argv, num_rank, num_node, cpu_per_rank, timeout,
+                                           time_limit, job_name, node_list, host_file)
+
+        self.interactive = False
+        if len(argv) > 0 and argv[0] == 'lscpu':
+            self.interactive = True
+
+        self.controller_job_name = uuid.uuid4().hex
+
+        if self.config:
+            self.config.check_launcher('BsubLauncher')
+
+    def parse_mpiexec_argv(self):
+        """
+        Parse the subset of srun command line arguments used or
+        manipulated by GEOPM.
+        """
+        parser = SubsetOptionParser()
+        parser.add_option('-n', dest='num_rank', nargs=1, type='int')
+        parser.add_option('-m', dest='node_list', nargs=1, type='string')
+        parser.add_option('-J', dest='job_name', nargs=1, type='string')
+        parser.add_option('-q', dest='partition', nargs=1, type='string')
+
+        opts, self.argv_unparsed = parser.parse_args(self.argv_unparsed)
+
+        if opts.num_rank:
+            self.num_rank = opts.num_rank
+        else:
+            self.num_rank = 1
+        # we find number of nodes by parsing node list
+        self.num_node = 1
+        self.node_list = None
+        if opts.node_list:
+            self.num_node = len(opts.node_list.split(' '))
+            self.node_list = opts.node_list
+        self.rank_per_node = int_ceil_div(self.num_rank, self.num_node)
+        self.cpu_per_rank = 1
+
+        self.job_name = opts.job_name
+        self.host_file = None
+        self.partition = opts.partition
+        self.time_limit = None
+        self.timeout = None
+
+    def mpiexec_argv(self, is_geopmctl):
+        """
+        Returns a list of command line options for underlying job launch
+        application that reflect the state of the Launcher object.
+        """
+        result = []
+
+        if not self.interactive and not is_geopmctl:
+            result.extend(['-w "started(' + self.controller_job_name + ')"'])
+
+        result.extend(self.num_node_option())
+        result.extend(self.num_rank_option(is_geopmctl))
+        if not is_geopmctl:
+            result.extend(self.affinity_option(is_geopmctl))
+        result.extend(self.timeout_option())
+        result.extend(self.time_limit_option())
+        if is_geopmctl:
+            result.extend(['-J', '"' + self.controller_job_name + '"'])
+        else:
+            result.extend(self.job_name_option())
+        result.extend(self.node_list_option())
+        result.extend(self.host_file_option())
+        result.extend(self.partition_option())
+
+        if self.interactive:
+            result.extend(['-Is'])
+
+        if is_geopmctl:
+            # geopmctl is spawned using mpiexec
+            result.extend(['mpiexec --mca mpi_warn_on_fork 0'])
+            # and we also need to pass name where trace file should go
+            env = self.environ()
+            if 'GEOPM_TRACE' in env:
+                var = 'GEOPM_TRACE=' + env['GEOPM_TRACE']
+                result.extend(['-x', var])
+        elif not self.interactive:
+            result.extend(self.build_job_script())
+
+        return result
+
+    def build_job_script(self):
+        result = []
+
+        count = 0
+        # check if there are any arguments to be passed to bsub
+        for arg in self.argv_unparsed:
+            if arg.startswith('-R'):
+                result += ['-R"' + arg[2:] + '"']
+                count += 1
+            else:
+                break
+
+        # build job script
+        new_file, filename = tempfile.mkstemp()
+        os.write(new_file, '#!/bin/bash\n')
+
+        # find the full path to the library
+        path = os.environ['LD_LIBRARY_PATH']
+        paths = path.split(os.pathsep)
+        geopm_lib = None
+        for p in paths:
+            f = os.path.join(p, 'libgeopm.so')
+            if os.path.isfile(f):
+                geopm_lib = f
+                break
+        if geopm_lib == None:
+            raise RuntimeError('Cannot find full path to libgeopm.so library')
+        os.write(new_file, 'export LD_PRELOAD="' + geopm_lib + '"\n')
+
+        os.write(new_file, 'export GEOPM_PMPI_CTL=application\n')
+
+        env = self.environ()
+        env_vars = ['LD_DYNAMIC_WEAK', 'GEOPM_REPORT', 'GEOPM_TRACE']
+        for env_var in env_vars:
+            if env_var in env:
+                var = 'export ' + env_var + '=' + env[env_var]
+                os.write(new_file, var + '\n')
+
+        os.write(new_file, ' '.join(self.argv_unparsed[count:]))
+
+        self.argv_unparsed = ['<', filename]
+
+        return result
+        
+
+    def mpiexec(self):
+        """
+        Returns 'bsub', the name of the LSF MPI job launch application.
+        """
+        return 'bsub'
+
+    def num_rank_option(self, is_geopmctl):
+        """ 
+        Returns number of ranks
+        """
+        if is_geopmctl:
+            return ['-n', str(self.num_node), '-R"span[ptile=1]"']
+        else:
+            if self.num_rank % self.num_node > 0:
+                raise RuntimeError("Number of ranks must be divisible by number of nodes")
+            ranks_per_node = self.num_rank // self.num_node
+            span = '-R"span[ptile=' + str(ranks_per_node) + ']"'
+            return ['-n', str(self.num_rank), span]
+
+    def num_node_option(self):
+        return []
+
+    def affinity_option(self, is_geopmctl):
+        """
+        Affinity assigns one core exclusively to each rank
+        """
+        return [ '-R"affinity[core(1,exclusive=(socket,injob))]"']
+
+    def timeout_option(self):
+        return []
+
+    def time_limit_option(self):
+        return []
+
+    def job_name_option(self):
+        """
+        Returns a list containing the -J option for bsub
+        """
+
+        result = []
+        if self.job_name is not None:
+            result = ['-J', self.job_name]
+        return result
+
+    def node_list_option(self):
+        """
+        Returns a list containing the -m option for bsub.
+        """
+        result = []
+        if self.node_list is not None:
+            result = ['-m', '"' + self.node_list + '"']
+        return result
+
+    def partition_option(self):
+        """
+        Returns a list containing the command line options specifiying the
+        compute node partition for the job to run on.
+        """
+        result = []
+        if self.partition is not None:
+            result = ['-q', self.partition]
+        return result    
 
 class SrunLauncher(Launcher):
     """

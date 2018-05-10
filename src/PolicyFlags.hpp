@@ -42,8 +42,8 @@ namespace geopm
     class IPolicyFlags
     {
         public:
-            IPolicyFlags() {}
-            virtual ~IPolicyFlags() {}
+            IPolicyFlags() = default;
+            virtual ~IPolicyFlags() = default;
             /// @brief Get the encoded flags
             /// @return Integer representation of flags
             virtual unsigned long flags(void) const = 0;
@@ -101,7 +101,7 @@ namespace geopm
         public:
             PolicyFlags(long int flags);
             /// @brief GlobalPolicy destructor
-            virtual ~PolicyFlags();
+            virtual ~PolicyFlags() = default;
             unsigned long flags(void) const override;
             double frequency_hz(void) const  override;
             int tdp_percent(void) const override;
@@ -114,7 +114,7 @@ namespace geopm
             void affinity(int cpu_affinity) override;
             void goal(int geo_goal) override;
             void num_max_perf(int num_big_cores) override;
-        protected:
+        private:
             /// @brief Encapsulates power policy information as a
             /// 32-bit bitmask.
             enum m_policy_flags_e {

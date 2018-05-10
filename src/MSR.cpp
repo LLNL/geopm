@@ -35,11 +35,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <string.h>
 #include <cfloat>
 #include <cmath>
 #include <sstream>
 #include <numeric>
-#include <string.h>
 
 #include "MSR.hpp"
 #include "MSRIO.hpp"
@@ -60,11 +60,12 @@ namespace geopm
         public:
             MSREncode(const struct IMSR::m_encode_s &msre);
             MSREncode(int begin_bit, int end_bit, int function, double scalar);
-            virtual ~MSREncode();
-            double decode(uint64_t field, uint64_t last_field);
+            virtual ~MSREncode() = default;
+            double decode(uint64_t field, uint64_t last_value);
             uint64_t encode(double value);
             uint64_t mask(void);
-        protected:
+            int decode_function(void);
+        private:
             const int m_function;
             int m_shift;
             uint64_t m_mask;
@@ -93,16 +94,13 @@ namespace geopm
         }
     }
 
-    MSREncode::~MSREncode()
-    {
-
-    }
-
-    double MSREncode::decode(uint64_t field, uint64_t last_field)
+    double MSREncode::decode(uint64_t field, uint64_t last_value)
     {
         double result = NAN;
         uint64_t sub_field = (field & m_mask) >> m_shift;
         uint64_t float_y, float_z;
+        int num_overflow;
+        uint64_t max;
         switch (m_function) {
             case IMSR::M_FUNCTION_LOG_HALF:
                 // F = S * 2.0 ^ -X
@@ -116,13 +114,20 @@ namespace geopm
                 result = (1ULL << float_y) * (1.0 + float_z / 4.0);
                 break;
             case IMSR::M_FUNCTION_OVERFLOW:
-                if (sub_field < last_field) {
-                    sub_field = sub_field + ((1 << m_num_bit) - 1);
+                max = (1ULL << m_num_bit) - 1;
+                num_overflow = last_value / (max + 1);  // max + 1 in case last value is max
+                last_value = last_value - (max * num_overflow);
+                result = sub_field;
+                if (result < last_value) {
+                    ++num_overflow;
+                    result = result + (max * num_overflow);
                 }
-                result = (float)sub_field;
                 break;
             case IMSR::M_FUNCTION_SCALE:
-                result = (float)sub_field;
+                result = sub_field;
+                break;
+            case IMSR::M_FUNCTION_NORMALIZE_64:
+                result = sub_field - last_value;
             default:
                 break;
         }
@@ -168,9 +173,10 @@ namespace geopm
                                     GEOPM_ERROR_INVALID, __FILE__, __LINE__);
                 }
                 break;
-           default:
+            default:
                 throw Exception("MSR::encode(): unimplemented scale function",
                                 GEOPM_ERROR_NOT_IMPLEMENTED,  __FILE__, __LINE__);
+                break;
 
         }
         result = (result << m_shift) & m_mask;
@@ -182,6 +188,11 @@ namespace geopm
         return m_mask;
     }
 
+    int MSREncode::decode_function(void)
+    {
+        return m_function;
+    }
+
     MSR::MSR(const std::string &msr_name,
              uint64_t offset,
              const std::vector<std::pair<std::string, struct IMSR::m_encode_s> > &signal,
@@ -190,7 +201,7 @@ namespace geopm
         , m_offset(offset)
         , m_signal_encode(signal.size(), NULL)
         , m_control_encode(control.size())
-        , m_domain_type(IPlatformTopo::M_DOMAIN_CPU)
+        , m_domain_type(IPlatformTopo::M_DOMAIN_INVALID)
         , m_prog_msr(0)
         , m_prog_field_name(0)
         , m_prog_value(0)
@@ -223,12 +234,15 @@ namespace geopm
             m_control_map.insert(std::pair<std::string, int>(it->first, idx));
             m_control_encode[idx] = new MSREncode(it->second);
         }
-
-        if (m_name.compare(0, strlen("PKG_"), "PKG_") == 0) {
-            m_domain_type = IPlatformTopo::M_DOMAIN_PACKAGE;
+        if (signal.size() != 0) {
+            m_domain_type = signal[0].second.domain;
         }
-        else if (m_name.compare(0, strlen("DRAM_"), "DRAM_") == 0) {
-            m_domain_type = IPlatformTopo::M_DOMAIN_BOARD_MEMORY;
+        else if (control.size() != 0) {
+            m_domain_type = control[0].second.domain;
+        }
+        else {
+            throw Exception("MSR::init(): both signal and control vectors are empty",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
     }
 
@@ -333,25 +347,38 @@ namespace geopm
         return m_domain_type;
     }
 
-    /// @todo Do we really want to store domain_type and domain_idx?
-    ///       the class is just holding them for the getters.
+    int MSR::decode_function(int signal_idx) const
+    {
+        return m_signal_encode[signal_idx]->decode_function();
+    }
+
     MSRSignal::MSRSignal(const IMSR &msr_obj,
                          int domain_type,
-                         int domain_idx,
+                         int cpu_idx,
                          int signal_idx)
         : m_name(msr_obj.name() + ":" + msr_obj.signal_name(signal_idx))
         , m_msr_obj(msr_obj)
         , m_domain_type(domain_type)
-        , m_domain_idx(domain_idx)
+        , m_cpu_idx(cpu_idx)
         , m_signal_idx(signal_idx)
         , m_field_ptr(nullptr)
-        , m_field_last(0)
+        , m_signal_last(0)
         , m_is_field_mapped(false)
+        , m_is_sample_once(true)
     {
 
     }
 
-    MSRSignal::~MSRSignal()
+    MSRSignal::MSRSignal(const MSRSignal &other)
+        : m_name(other.m_name)
+        , m_msr_obj(other.m_msr_obj)
+        , m_domain_type(other.m_domain_type)
+        , m_cpu_idx(other.m_cpu_idx)
+        , m_signal_idx(other.m_signal_idx)
+        , m_field_ptr(nullptr)
+        , m_signal_last(other.m_signal_last)
+        , m_is_field_mapped(false)
+        , m_is_sample_once(other.m_is_sample_once)
     {
 
     }
@@ -366,9 +393,9 @@ namespace geopm
         return m_domain_type;
     }
 
-    int MSRSignal::domain_idx(void) const
+    int MSRSignal::cpu_idx(void) const
     {
-        return m_domain_idx;
+        return m_cpu_idx;
     }
 
     double MSRSignal::sample(void)
@@ -377,7 +404,17 @@ namespace geopm
             throw Exception("MSRSignal::sample(): must call map() method before sample() can be called",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-        return m_msr_obj.signal(m_signal_idx, *m_field_ptr, m_field_last);
+
+        double result = m_msr_obj.signal(m_signal_idx, *m_field_ptr, m_signal_last);
+        if (m_msr_obj.decode_function(m_signal_idx) == IMSR::M_FUNCTION_OVERFLOW) {
+            m_signal_last = *m_field_ptr;
+        }
+        else if (m_is_sample_once && m_msr_obj.decode_function(m_signal_idx) == IMSR::M_FUNCTION_NORMALIZE_64) {
+            m_signal_last = *m_field_ptr;
+            result = 0.0;
+        }
+        m_is_sample_once = false;
+        return result;
     }
 
     uint64_t MSRSignal::offset(void) const
@@ -393,12 +430,12 @@ namespace geopm
 
     MSRControl::MSRControl(const IMSR &msr_obj,
                            int domain_type,
-                           int domain_idx,
+                           int cpu_idx,
                            int control_idx)
         : m_name(msr_obj.name() + ":" + msr_obj.control_name(control_idx))
         , m_msr_obj(msr_obj)
         , m_domain_type(domain_type)
-        , m_domain_idx(domain_idx)
+        , m_cpu_idx(cpu_idx)
         , m_control_idx(control_idx)
         , m_field_ptr(nullptr)
         , m_mask_ptr(nullptr)
@@ -422,9 +459,9 @@ namespace geopm
         return m_domain_type;
     }
 
-    int MSRControl::domain_idx(void) const
+    int MSRControl::cpu_idx(void) const
     {
-        return m_domain_idx;
+        return m_cpu_idx;
     }
 
     void MSRControl::adjust(double setting)

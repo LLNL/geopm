@@ -62,6 +62,7 @@ namespace geopm
                 M_FUNCTION_LOG_HALF,        // 2.0 ^ -X
                 M_FUNCTION_7_BIT_FLOAT,     // 2 ^ Y * (1.0 + Z / 4.0) : Y in [0:5), Z in [5:7)
                 M_FUNCTION_OVERFLOW,        // Counter that may overflow
+                M_FUNCTION_NORMALIZE_64,    // Subtract first value read from all subsequent values to avoid mantissa overflow with 64 bit integers.
             };
 
             enum m_units_e {
@@ -73,8 +74,8 @@ namespace geopm
                 M_UNITS_CELSIUS,
             };
 
-            IMSR() {}
-            virtual ~IMSR() {}
+            IMSR() = default;
+            virtual ~IMSR() = default;
             /// @brief Query the name of the MSR.
             /// @param msr_name [out] The name of the MSR.
             virtual std::string name(void) const = 0;
@@ -112,6 +113,9 @@ namespace geopm
             /// @brief Extract a signal from a raw MSR value.
             /// @param [in] signal_idx Index of the signal bit field.
             /// @param [in] field the 64-bit register value to decode.
+            /// @param [in] last_field Previous value of the MSR.
+            ///        Only relevant if the decode function is
+            ///        m_FUNCTION_OVERFLOW or M_FUNCTION_NORMALIZE_64.
             /// @return The decoded signal in SI units.
             virtual double signal(int signal_idx,
                                   uint64_t field,
@@ -134,13 +138,16 @@ namespace geopm
             ///         defined in the m_domain_e enum
             ///         from the PlatformTopo.hpp header.
             virtual int domain_type(void) const = 0;
+            /// @brief The function used to decode the MSR value as defined
+            ///        in the m_function_e enum.
+            virtual int decode_function(int signal_idx) const = 0;
     };
 
     class IMSRSignal
     {
         public:
-            IMSRSignal() {}
-            virtual ~IMSRSignal() {}
+            IMSRSignal() = default;
+            virtual ~IMSRSignal() = default;
             /// @brief Get the signal parameter name.
             /// @return The name of the feature being measured.
             virtual std::string name(void) const = 0;
@@ -148,10 +155,10 @@ namespace geopm
             /// @return One of the values from the IPlatformTopo::m_domain_e
             ///         enum described in PlatformTopo.hpp.
             virtual int domain_type(void) const = 0;
-            /// @brief Get the index of the domain under measurement.
+            /// @brief Get the index of the cpu in the domain under measurement.
             /// @return The index of the domain within the set of
             ///         domains of the same type on the platform.
-            virtual int domain_idx(void) const = 0;
+            virtual int cpu_idx(void) const = 0;
             /// @brief Get the value of the signal.
             /// @return The value of the parameter measured in SI
             ///         units.
@@ -171,8 +178,8 @@ namespace geopm
     class IMSRControl
     {
         public:
-            IMSRControl() {}
-            virtual ~IMSRControl() {}
+            IMSRControl() = default;
+            virtual ~IMSRControl() = default;
             /// @brief Get the control parameter name.
             /// @return The name of the feature under control.
             virtual std::string name(void) const = 0;
@@ -180,10 +187,10 @@ namespace geopm
             /// @return One of the values from the m_domain_e
             ///         enum described in PlatformTopo.hpp.
             virtual int domain_type(void) const = 0;
-            /// @brief Get the index of the domain under control.
+            /// @brief Get the index of the cpu in the domain under control.
             /// @return The index of the domain within the set of
             ///        domains of the same type on the platform.
-            virtual int domain_idx(void) const = 0;
+            virtual int cpu_idx(void) const = 0;
             /// @brief Set the value for the control.
             /// @param [in] setting Value in SI units of the parameter
             ///        controlled by the object.
@@ -241,7 +248,8 @@ namespace geopm
                          uint64_t &field,
                          uint64_t &mask) const override;
             int domain_type(void) const override;
-        protected:
+            int decode_function(int signal_idx) const override;
+        private:
             void init(const std::vector<std::pair<std::string, struct IMSR::m_encode_s> > &signal,
                       const std::vector<std::pair<std::string, struct IMSR::m_encode_s> > &control);
             std::string m_name;
@@ -271,27 +279,29 @@ namespace geopm
             ///        the MSR that the class represents.
             MSRSignal(const IMSR &msr_obj,
                       int domain_type,
-                      int domain_idx,
+                      int cpu_idx,
                       int signal_idx);
-            /// @todo Revisit whether this is really okay to copy
-            MSRSignal(const MSRSignal &other) = default;
-            MSRSignal &operator=(const MSRSignal &other) = default;
-            virtual ~MSRSignal();
+            /// @brief Copy constructor.  After copying, map field
+            ///        must be called again on the new MSRSignal.
+            MSRSignal(const MSRSignal &other);
+            MSRSignal &operator=(const MSRSignal &other) = delete;
+            virtual ~MSRSignal() = default;
             virtual std::string name(void) const override;
             int domain_type(void) const override;
-            int domain_idx(void) const override;
+            int cpu_idx(void) const override;
             double sample(void) override;
             uint64_t offset(void) const override;
             void map_field(const uint64_t *field) override;
-        protected:
+        private:
             const std::string m_name;
             const IMSR &m_msr_obj;
             const int m_domain_type;
-            const int m_domain_idx;
+            const int m_cpu_idx;
             const int m_signal_idx;
             const uint64_t *m_field_ptr;
-            uint64_t m_field_last;
+            uint64_t m_signal_last;
             bool m_is_field_mapped;
+            bool m_is_sample_once;
     };
 
     class MSRControl : public IMSRControl
@@ -308,23 +318,23 @@ namespace geopm
             ///        the MSR that the class represents.
             MSRControl(const IMSR &msr_obj,
                        int domain_type,
-                       int domain_idx,
+                       int cpu_idx,
                        int control_idx);
             MSRControl(const MSRControl &other) = default;
             MSRControl &operator=(const MSRControl &other) = default;
             virtual ~MSRControl();
             virtual std::string name(void) const override;
             int domain_type(void) const override;
-            int domain_idx(void) const override;
+            int cpu_idx(void) const override;
             void adjust(double setting) override;
             uint64_t offset(void) const override;
             uint64_t mask(void) const override;
             void map_field(uint64_t *field, uint64_t *mask) override;
-        protected:
+        private:
             const std::string m_name;
             const IMSR &m_msr_obj;
             const int m_domain_type;
-            const int m_domain_idx;
+            const int m_cpu_idx;
             const int m_control_idx;
             uint64_t *m_field_ptr;
             uint64_t *m_mask_ptr;

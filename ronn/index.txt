@@ -31,8 +31,11 @@
 
 #geopm pages
 geopm(7)            geopm.7
+geopm_agent_monitor(7)  geopm_agent_monitor.7
 geopmpy(7)          geopmpy.7
+geopm_agent_c(3)    geopm_agent_c.3
 geopm_ctl_c(3)      geopm_ctl_c.3
+geopm_endpoint_c(3) geopm_endpoint_c.3
 geopm_error(3)      geopm_error.3
 geopm_fortran(3)    geopm_fortran.3
 geopm_policy_c(3)   geopm_policy_c.3
@@ -47,6 +50,8 @@ geopmplotter(1)     geopmplotter.1
 geopmpolicy(1)      geopmpolicy.1
 geopmpy_launcher(1) geopmpy_launcher.1
 geopmsrun(1)        geopmsrun.1
+geopmagent(1)       geopmagent.1
+geopmendpoint(1)    geopmendpoint.1
 
 
 #external pages

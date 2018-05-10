@@ -133,11 +133,6 @@ namespace geopm
 
     }
 
-    Platform::~Platform()
-    {
-
-    }
-
     void Platform::set_implementation(PlatformImp* platform_imp, bool do_initialize)
     {
         m_imp = platform_imp;

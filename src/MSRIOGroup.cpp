@@ -46,6 +46,7 @@
 #include "MSRIOGroup.hpp"
 #include "MSRIO.hpp"
 #include "PlatformTopo.hpp"
+#include "Helper.hpp"
 #include "config.h"
 
 #define GEOPM_MSR_IO_GROUP_PLUGIN_NAME "MSR"
@@ -58,13 +59,14 @@ namespace geopm
     static const MSR *init_msr_arr(int cpu_id, size_t &arr_size);
 
     MSRIOGroup::MSRIOGroup()
-        : MSRIOGroup(std::unique_ptr<IMSRIO>(new MSRIO), cpuid(), geopm_sched_num_cpu())
+        : MSRIOGroup(platform_topo(), std::unique_ptr<IMSRIO>(new MSRIO), cpuid(), geopm_sched_num_cpu())
     {
 
     }
 
-    MSRIOGroup::MSRIOGroup(std::unique_ptr<IMSRIO> msrio, int cpuid, int num_cpu)
-        : m_num_cpu(num_cpu)
+    MSRIOGroup::MSRIOGroup(IPlatformTopo &topo, std::unique_ptr<IMSRIO> msrio, int cpuid, int num_cpu)
+        : m_platform_topo(topo)
+        , m_num_cpu(num_cpu)
         , m_is_active(false)
         , m_is_read(false)
         , m_msrio(std::move(msrio))
@@ -85,11 +87,15 @@ namespace geopm
             }
         }
 
-        register_msr_signal("FREQUENCY", "MSR::PERF_STATUS:FREQ");
-        register_msr_control("FREQUENCY", "MSR::PERF_CTL:FREQ");
+        register_msr_signal("FREQUENCY",         "MSR::PERF_STATUS:FREQ");
+        register_msr_signal("ENERGY_PACKAGE",    "MSR::PKG_ENERGY_STATUS:ENERGY");
+        register_msr_signal("ENERGY_DRAM",       "MSR::DRAM_ENERGY_STATUS:ENERGY");
+        register_msr_signal("CYCLES_THREAD",     "MSR::PERF_FIXED_CTR1:CPU_CLK_UNHALTED_THREAD");
+        register_msr_signal("CYCLES_REFERENCE",  "MSR::PERF_FIXED_CTR2:CPU_CLK_UNHALTED_REF_TSC");
+        register_msr_signal("POWER_PACKAGE_MIN", "MSR::PKG_POWER_INFO:MIN_POWER");
+        register_msr_signal("POWER_PACKAGE_MAX", "MSR::PKG_POWER_INFO:MAX_POWER");
 
-        register_msr_signal("ENERGY_PACKAGE", "MSR::PKG_ENERGY_STATUS:ENERGY");
-        register_msr_signal("ENERGY_DRAM", "MSR::DRAM_ENERGY_STATUS:ENERGY");
+        register_msr_control("FREQUENCY",        "MSR::PERF_CTL:FREQ");
     }
 
     MSRIOGroup::~MSRIOGroup()
@@ -104,46 +110,58 @@ namespace geopm
                 delete ctl_ptr;
             }
         }
-
     }
 
-    bool MSRIOGroup::is_valid_signal(const std::string &signal_name)
+    std::set<std::string> MSRIOGroup::signal_names(void) const
     {
-        return m_name_cpu_signal_map.find(signal_name) != m_name_cpu_signal_map.end();
-    }
-
-    bool MSRIOGroup::is_valid_control(const std::string &control_name)
-    {
-        return m_name_cpu_control_map.find(control_name) != m_name_cpu_control_map.end();
-    }
-
-    int MSRIOGroup::signal_domain_type(const std::string &signal_name)
-    {
-        int result = IPlatformTopo::M_DOMAIN_INVALID;
-        if (is_valid_signal(signal_name)) {
-            /// @todo support for non-CPU domains.
-            result = IPlatformTopo::M_DOMAIN_CPU;
+        std::set<std::string> result;
+        for (const auto &sv : m_name_cpu_signal_map) {
+            result.insert(sv.first);
         }
         return result;
     }
 
-    int MSRIOGroup::control_domain_type(const std::string &control_name)
+    std::set<std::string> MSRIOGroup::control_names(void) const
+    {
+        std::set<std::string> result;
+        for (const auto &sv : m_name_cpu_control_map) {
+            result.insert(sv.first);
+        }
+        return result;
+    }
+
+    bool MSRIOGroup::is_valid_signal(const std::string &signal_name) const
+    {
+        return m_name_cpu_signal_map.find(signal_name) != m_name_cpu_signal_map.end();
+    }
+
+    bool MSRIOGroup::is_valid_control(const std::string &control_name) const
+    {
+        return m_name_cpu_control_map.find(control_name) != m_name_cpu_control_map.end();
+    }
+
+    int MSRIOGroup::signal_domain_type(const std::string &signal_name) const
     {
         int result = IPlatformTopo::M_DOMAIN_INVALID;
-        if (is_valid_control(control_name)) {
-            /// @todo support for non-CPU domains.
-            result = IPlatformTopo::M_DOMAIN_CPU;
+        auto it = m_name_cpu_signal_map.find(signal_name);
+        if (it != m_name_cpu_signal_map.end()) {
+            result = it->second[0]->domain_type();
+        }
+        return result;
+    }
+
+    int MSRIOGroup::control_domain_type(const std::string &control_name) const
+    {
+        int result = IPlatformTopo::M_DOMAIN_INVALID;
+        auto it = m_name_cpu_control_map.find(control_name);
+        if (it != m_name_cpu_control_map.end()) {
+            result = it->second[0]->domain_type();
         }
         return result;
     }
 
     int MSRIOGroup::push_signal(const std::string &signal_name, int domain_type, int domain_idx)
     {
-        /// @todo support for non-CPU domains.
-        if (domain_type != IPlatformTopo::M_DOMAIN_CPU) {
-            throw Exception("MSRIOGroup::push_signal(): non-CPU domain_type not implemented.",
-                            GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
-        }
         if (m_is_active) {
             throw Exception("MSRIOGroup::push_signal(): cannot push a signal after read_batch() or adjust() has been called.",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
@@ -154,12 +172,16 @@ namespace geopm
                             signal_name + "\" not found",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-
-        /// @todo support for non-CPU domains.
-        if (domain_idx < 0 || domain_idx > geopm_sched_num_cpu()) {
-            throw Exception("MSRIOGroup::push_signal(): domain_idx out of bounds.",
+        if (domain_type != signal_domain_type(signal_name)) {
+            throw Exception("MSRIOGroup::push_signal(): domain_type does not match the domain of the signal.",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
+        if (domain_idx < 0 || domain_idx >= m_platform_topo.num_domain(domain_type)) {
+            throw Exception("MSRIOGroup::push_signal(): domain_idx out of range",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+        }
+        std::set<int> cpu_idx;
+        m_platform_topo.domain_cpus(domain_type, domain_idx, cpu_idx);
 
         int result = -1;
         bool is_found = false;
@@ -172,20 +194,17 @@ namespace geopm
             }
 #endif
             // signal_name may be alias, so use active signal MSR name
-            std::string registered_name = ncsm_it->second[domain_idx]->name();
-            /// @todo Support non-CPU domains and check domain type of the signal here
+            std::string registered_name = ncsm_it->second[*(cpu_idx.begin())]->name();
             if (m_active_signal[ii]->name() == registered_name &&
-                m_active_signal[ii]->domain_idx() == domain_idx) {
+                m_active_signal[ii]->cpu_idx() == *(cpu_idx.begin())) {
                 result = ii;
                 is_found = true;
             }
         }
 
-        /// @todo support for non-CPU domains.
-        int cpu_idx = domain_idx;
         if (!is_found) {
             result = m_active_signal.size();
-            m_active_signal.push_back(ncsm_it->second[cpu_idx]);
+            m_active_signal.push_back(ncsm_it->second[*(cpu_idx.begin())]);
             MSRSignal *msr_sig = m_active_signal[result];
 #ifdef GEOPM_DEBUG
             if (!msr_sig) {
@@ -194,7 +213,7 @@ namespace geopm
             }
 #endif
             uint64_t offset = msr_sig->offset();
-            m_read_cpu_idx.push_back(cpu_idx);
+            m_read_cpu_idx.push_back(*(cpu_idx.begin()));
             m_read_offset.push_back(offset);
         }
         return result;
@@ -202,27 +221,26 @@ namespace geopm
 
     int MSRIOGroup::push_control(const std::string &control_name, int domain_type, int domain_idx)
     {
-        /// @todo support for non-CPU domains.
-        if (domain_type != IPlatformTopo::M_DOMAIN_CPU) {
-            throw Exception("MSRIOGroup::push_control(): non-CPU domain_type not implemented.",
-                            GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
-        }
         if (m_is_active) {
             throw Exception("MSRIOGroup::push_control(): cannot push a control after read_batch() or adjust() has been called.",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-        /// @todo support for non-CPU domains.
-        if (domain_idx < 0 || domain_idx > geopm_sched_num_cpu()) {
-            throw Exception("MSRIOGroup::push_control(): domain_idx out of bounds.",
-                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
-        }
-
         auto nccm_it = m_name_cpu_control_map.find(control_name);
         if (nccm_it == m_name_cpu_control_map.end()) {
             throw Exception("MSRIOGroup::push_control(): control name \"" +
                             control_name + "\" not found",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
+        if (domain_type != control_domain_type(control_name)) {
+            throw Exception("MSRIOGroup::push_control(): domain_type does not match the domain of the control.",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+        }
+        if (domain_idx < 0 || domain_idx >= m_platform_topo.num_domain(domain_type)) {
+            throw Exception("MSRIOGroup::push_control(): domain_idx out of range",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+        }
+        std::set<int> cpu_idx;
+        m_platform_topo.domain_cpus(domain_type, domain_idx, cpu_idx);
 
         int result = -1;
         bool is_found = false;
@@ -230,25 +248,28 @@ namespace geopm
         for (size_t ii = 0; !is_found && ii < m_active_control.size(); ++ii) {
 #ifdef GEOPM_DEBUG
             if (!m_active_control[ii]) {
-                throw Exception("MSRIOGroup::push_control(): NULL MSRControl pointer was saved in active signals",
+                throw Exception("MSRIOGroup::push_control(): NULL MSRControl pointer was saved in active controls",
                                 GEOPM_ERROR_LOGIC, __FILE__, __LINE__);
             }
 #endif
+            if (control_name == "POWER_PACKAGE") {
+                write_control("MSR::PKG_POWER_LIMIT:SOFT_LIMIT_ENABLE", domain_type, domain_idx, 1.0);
+            }
+            if (control_name == "FREQUENCY") {
+                write_control("MSR::PERF_CTL:ENABLE", domain_type, domain_idx, 1.0);
+            }
             // control_name may be alias, so use active control MSR name
-            std::string registered_name = nccm_it->second[domain_idx]->name();
-            /// @todo Support non-CPU domains and check domain type of the control here
+            std::string registered_name = nccm_it->second[*(cpu_idx.begin())]->name();
             if (m_active_control[ii]->name() == registered_name &&
-                m_active_control[ii]->domain_idx() == domain_idx) {
+                m_active_control[ii]->cpu_idx() == *(cpu_idx.begin())) {
                 result = ii;
                 is_found = true;
             }
         }
-        /// @todo support for non-CPU domains.
-        int cpu_idx = domain_idx;
+
         if (!is_found) {
             result = m_active_control.size();
-            m_is_adjusted.push_back(false);
-            m_active_control.push_back(nccm_it->second[cpu_idx]);
+            m_active_control.push_back(nccm_it->second[*(cpu_idx.begin())]);
             MSRControl *msr_ctl = m_active_control[result];
 #ifdef GEOPM_DEBUG
             if (!msr_ctl) {
@@ -258,9 +279,10 @@ namespace geopm
 #endif
             uint64_t offset = msr_ctl->offset();
             uint64_t mask = msr_ctl->mask();
-            m_write_cpu_idx.push_back(cpu_idx);
+            m_write_cpu_idx.push_back(*(cpu_idx.begin()));
             m_write_offset.push_back(offset);
             m_write_mask.push_back(mask);
+            m_is_adjusted.push_back(false);
         }
         return result;
     }
@@ -278,9 +300,8 @@ namespace geopm
 
     void MSRIOGroup::write_batch(void)
     {
-        if (m_active_control.size())
-        {
-            if (std::any_of(m_is_adjusted.begin(), m_is_adjusted.end(), [](bool it){return !it;})) {
+        if (m_active_control.size()) {
+            if (std::any_of(m_is_adjusted.begin(), m_is_adjusted.end(), [](bool it) {return !it;})) {
                 throw Exception("MSRIOGroup::write_batch() called before all controls were adjusted",
                                 GEOPM_ERROR_INVALID, __FILE__, __LINE__);
             }
@@ -318,59 +339,63 @@ namespace geopm
 
     double MSRIOGroup::read_signal(const std::string &signal_name, int domain_type, int domain_idx)
     {
-        /// @todo support for non-CPU domains.
-        if (domain_type != IPlatformTopo::M_DOMAIN_CPU) {
-            throw Exception("MSRIOGroup::read_signal(): non-CPU domain_type not implemented.",
-                            GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
-        }
         auto ncsm_it = m_name_cpu_signal_map.find(signal_name);
         if (ncsm_it == m_name_cpu_signal_map.end()) {
             throw Exception("MSRIOGroup::read_signal(): signal name \"" +
                             signal_name + "\" not found",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-        /// @todo support for non-CPU domains.
-        if (domain_idx < 0 || domain_idx > geopm_sched_num_cpu()) {
-            throw Exception("MSRIOGroup::read_signal(): domain_idx out of bounds.",
+        if (domain_type != signal_domain_type(signal_name)) {
+            throw Exception("MSRIOGroup::read_signal(): domain_type requested does not match the domain of the signal.",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
+        if (domain_idx < 0 || domain_idx >= m_platform_topo.num_domain(domain_type)) {
+            throw Exception("MSRIOGroup::read_signal(): domain_idx out of range",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+        }
+        std::set<int> cpu_idx;
+        m_platform_topo.domain_cpus(domain_type, domain_idx, cpu_idx);
 
-        int cpu_idx = domain_idx;
-        MSRSignal signal = *(ncsm_it->second[cpu_idx]);
+        // Copy of existing signal but map own memory
+        MSRSignal signal {*(ncsm_it->second[*(cpu_idx.begin())])};
         uint64_t offset = signal.offset();
         uint64_t field = 0;
         signal.map_field(&field);
-        field = m_msrio->read_msr(cpu_idx, offset);
+        field = m_msrio->read_msr(*(cpu_idx.begin()), offset);
+        // @todo last value can only get updated with read batch. This means that
+        // multiple calls to read_signal for a 64-bit counter will return 0
+        // unless read_batch is called for those counters.
+        // Alternative it to update last_value here, but that would mean
+        // multiple calls to sample() could return different values if interleaved
+        // with a call to read_signal().
         return signal.sample();
     }
 
     void MSRIOGroup::write_control(const std::string &control_name, int domain_type, int domain_idx, double setting)
     {
-        /// @todo support for non-CPU domains.
-        if (domain_type != IPlatformTopo::M_DOMAIN_CPU) {
-            throw Exception("MSRIOGroup::write_control(): non-CPU domain_type not implemented.",
-                            GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
-        }
         auto nccm_it = m_name_cpu_control_map.find(control_name);
         if (nccm_it == m_name_cpu_control_map.end()) {
             throw Exception("MSRIOGroup::write_control(): control name \"" +
                             control_name + "\" not found",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-        /// @todo support for non-CPU domains.
-        if (domain_idx < 0 || domain_idx > geopm_sched_num_cpu()) {
-            throw Exception("MSRIOGroup::write_control(): domain_idx out of bounds.",
+        if (domain_type != control_domain_type(control_name)) {
+            throw Exception("MSRIOGroup::write_control(): domain_type does not match the domain of the control.",
                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
-
-        int cpu_idx = domain_idx;
-        MSRControl control = *(nccm_it->second[cpu_idx]);
+        if (domain_idx < 0 || domain_idx >= m_platform_topo.num_domain(domain_type)) {
+            throw Exception("MSRIOGroup::write_control(): domain_idx out of range",
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+        }
+        std::set<int> cpu_idx;
+        m_platform_topo.domain_cpus(domain_type, domain_idx, cpu_idx);
+        MSRControl control = *(nccm_it->second[*(cpu_idx.begin())]);
         uint64_t offset = control.offset();
         uint64_t field = 0;
         uint64_t mask = 0;
         control.map_field(&field, &mask);
         control.adjust(setting);
-        m_msrio->write_msr(cpu_idx, offset, field, mask);
+        m_msrio->write_msr(*(cpu_idx.begin()), offset, field, mask);
     }
 
     std::string MSRIOGroup::msr_whitelist(void) const
@@ -514,7 +539,7 @@ namespace geopm
         }
 
         for (int cpu_idx = 0; cpu_idx < m_num_cpu; ++cpu_idx) {
-            cpu_signal[cpu_idx] = new MSRSignal(msr_obj, PlatformTopo::M_DOMAIN_CPU,
+            cpu_signal[cpu_idx] = new MSRSignal(msr_obj, msr_obj.domain_type(),
                                                 cpu_idx, signal_idx);
         }
     }
@@ -565,7 +590,7 @@ namespace geopm
         }
 
         for (int cpu_idx = 0; cpu_idx < m_num_cpu; ++cpu_idx) {
-            cpu_control[cpu_idx] = new MSRControl(msr_obj, PlatformTopo::M_DOMAIN_CPU, cpu_idx, control_idx);
+            cpu_control[cpu_idx] = new MSRControl(msr_obj, msr_obj.domain_type(), cpu_idx, control_idx);
         }
     }
 
@@ -576,7 +601,7 @@ namespace geopm
 
     std::unique_ptr<IOGroup> MSRIOGroup::make_plugin(void)
     {
-        return std::unique_ptr<IOGroup>(new MSRIOGroup);
+        return geopm::make_unique<MSRIOGroup>();
     }
 
     const MSR *init_msr_arr(int cpu_id, size_t &arr_size)

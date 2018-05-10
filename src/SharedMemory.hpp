@@ -42,9 +42,9 @@ namespace geopm
     class ISharedMemory
     {
         public:
-            ISharedMemory() {}
-            ISharedMemory(const ISharedMemory &other) {}
-            virtual ~ISharedMemory() {}
+            ISharedMemory() = default;
+            ISharedMemory(const ISharedMemory &other) = default;
+            virtual ~ISharedMemory() = default;
             /// @brief Retrieve a pointer to the shared memory region.
             /// @return Void pointer to the shared memory region.
             virtual void *pointer(void) = 0;
@@ -58,9 +58,9 @@ namespace geopm
     class ISharedMemoryUser
     {
         public:
-            ISharedMemoryUser() {}
-            ISharedMemoryUser(const ISharedMemoryUser &other) {}
-            virtual ~ISharedMemoryUser() {}
+            ISharedMemoryUser() = default;
+            ISharedMemoryUser(const ISharedMemoryUser &other) = default;
+            virtual ~ISharedMemoryUser() = default;
             virtual void *pointer(void) = 0;
             virtual std::string key(void) = 0;
             virtual size_t size(void) = 0;
@@ -84,7 +84,7 @@ namespace geopm
             /// @return Key to the shared memory region.
             std::string key(void) override;
             size_t size(void) override;
-        protected:
+        private:
             /// @brief Shared memory key for the region.
             std::string m_shm_key;
             /// @brief Size of the region.
@@ -115,7 +115,7 @@ namespace geopm
             std::string key(void) override;
             size_t size(void) override;
             void unlink(void) override;
-        protected:
+        private:
             /// Shared memory key for the region.
             std::string m_shm_key;
             /// Size of the region.

@@ -48,8 +48,8 @@ namespace geopm
     class IPolicy
     {
         public:
-            IPolicy() {}
-            virtual ~IPolicy() {}
+            IPolicy() = default;
+            virtual ~IPolicy() = default;
             /// @brief Get number of control domains for the policy.
             /// @returns number of domains under control.
             virtual int num_domain(void) = 0;
@@ -133,7 +133,7 @@ namespace geopm
                                 std::vector<struct geopm_policy_message_s> &child_msg) override;
             void is_converged(uint64_t region_id, bool converged_state) override;
             bool is_converged(uint64_t region_id) override;
-        protected:
+        private:
             static bool m_is_once;
             IPolicyFlags *m_policy_flags;
             RegionPolicy *region_policy(uint64_t region_id);

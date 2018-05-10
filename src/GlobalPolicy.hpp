@@ -40,7 +40,8 @@
 #include "geopm_plugin.h"
 #include "geopm_message.h"
 
-namespace json11 {
+namespace json11
+{
     class Json;
 }
 
@@ -59,9 +60,9 @@ namespace geopm
     class IGlobalPolicy
     {
         public:
-            IGlobalPolicy() {}
+            IGlobalPolicy() = default;
             /// @brief GlobalPolicy destructor
-            virtual ~IGlobalPolicy() {}
+            virtual ~IGlobalPolicy() = default;
             /// @brief Get the policy power mode
             /// @return geopm_policy_mode_e power mode
             virtual int mode(void) const = 0;
@@ -201,7 +202,7 @@ namespace geopm
             void read(void) override;
             void enforce_static_mode() override;
             std::string header(void) const override;
-        protected:
+        private:
             /// @brief Structure intended to be shared between
             /// the resource manager and the geopm
             /// runtime in order to convey job wide

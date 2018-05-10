@@ -59,9 +59,9 @@ namespace geopm
     class ITreeCommunicator
     {
         public:
-            ITreeCommunicator() {}
-            ITreeCommunicator(const ITreeCommunicator &other) {}
-            virtual ~ITreeCommunicator() {}
+            ITreeCommunicator() = default;
+            ITreeCommunicator(const ITreeCommunicator &other) = default;
+            virtual ~ITreeCommunicator() = default;
             /// @brief The number of levels for calling process.
             ///
             /// Each of the processes in the communicator passed at
@@ -208,7 +208,7 @@ namespace geopm
             void get_sample(int level, std::vector<struct geopm_sample_message_s> &sample) override;
             void get_policy(int level, struct geopm_policy_message_s &policy) override;
             size_t overhead_send(void) override;
-        protected:
+        private:
             /// Number of levels this rank participates in
             int m_num_level;
             /// @brief Number of nodes in the job.
@@ -234,7 +234,7 @@ namespace geopm
             ///        the run.
             SingleTreeCommunicator(IGlobalPolicy *global_policy);
             SingleTreeCommunicator(const SingleTreeCommunicator &other);
-            virtual ~SingleTreeCommunicator();
+            virtual ~SingleTreeCommunicator() = default;
             int num_level(void) const override;
             int root_level(void) const override;
             int level_rank(int level) const override;
@@ -244,7 +244,7 @@ namespace geopm
             void get_sample(int level, std::vector<struct geopm_sample_message_s> &sample) override;
             void get_policy(int level, struct geopm_policy_message_s &policy) override;
             size_t overhead_send(void) override;
-        protected:
+        private:
             IGlobalPolicy *m_policy;
             struct geopm_sample_message_s m_sample;
     };

@@ -34,6 +34,7 @@
 #include "ProfileIOGroup.hpp"
 #include "PlatformTopo.hpp"
 #include "ProfileIOSample.hpp"
+#include "ProfileIORuntime.hpp"
 #include "Exception.hpp"
 #include "geopm_hash.h"
 #include "config.h"
@@ -42,43 +43,55 @@
 
 namespace geopm
 {
-    ProfileIOGroup::ProfileIOGroup(std::shared_ptr<IProfileIOSample> profile_sample)
-        : ProfileIOGroup(profile_sample, platform_topo())
+    ProfileIOGroup::ProfileIOGroup(std::shared_ptr<IProfileIOSample> profile_sample,
+                                   std::shared_ptr<IProfileIORuntime> profile_runtime)
+        : ProfileIOGroup(profile_sample, profile_runtime, platform_topo())
     {
 
     }
 
     ProfileIOGroup::ProfileIOGroup(std::shared_ptr<IProfileIOSample> profile_sample,
+                                   std::shared_ptr<IProfileIORuntime> profile_runtime,
                                    IPlatformTopo &topo)
         : m_profile_sample(profile_sample)
+        , m_profile_runtime(profile_runtime)
         , m_signal_idx_map{{plugin_name() + "::REGION_ID#", M_SIGNAL_REGION_ID},
-                           {plugin_name() + "::PROGRESS", M_SIGNAL_PROGRESS},
+                           {plugin_name() + "::REGION_PROGRESS", M_SIGNAL_PROGRESS},
                            {"REGION_ID#", M_SIGNAL_REGION_ID},
-                           {"PROGRESS", M_SIGNAL_PROGRESS}}
+                           {"REGION_PROGRESS", M_SIGNAL_PROGRESS},
+                           {plugin_name() + "::REGION_RUNTIME", M_SIGNAL_RUNTIME},
+                           {"REGION_RUNTIME", M_SIGNAL_RUNTIME}}
         , m_platform_topo(topo)
-        , m_do_read_region_id(false)
-        , m_do_read_progress(false)
-        , m_is_batch_read(false)
+        , m_per_cpu_runtime(topo.num_domain(IPlatformTopo::M_DOMAIN_CPU), NAN)
     {
 
     }
 
-    ProfileIOGroup::~ProfileIOGroup()
+    std::set<std::string> ProfileIOGroup::signal_names(void) const
     {
-
+        std::set<std::string> result;
+        for (const auto &sv : m_signal_idx_map) {
+            result.insert(sv.first);
+        }
+        return result;
     }
 
-    bool ProfileIOGroup::is_valid_signal(const std::string &signal_name)
+    std::set<std::string> ProfileIOGroup::control_names(void) const
+    {
+        return {};
+    }
+
+    bool ProfileIOGroup::is_valid_signal(const std::string &signal_name) const
     {
         return m_signal_idx_map.find(signal_name) != m_signal_idx_map.end();
     }
 
-    bool ProfileIOGroup::is_valid_control(const std::string &control_name)
+    bool ProfileIOGroup::is_valid_control(const std::string &control_name) const
     {
         return false;
     }
 
-    int ProfileIOGroup::signal_domain_type(const std::string &signal_name)
+    int ProfileIOGroup::signal_domain_type(const std::string &signal_name) const
     {
         int result = IPlatformTopo::M_DOMAIN_INVALID;
         if (is_valid_signal(signal_name)) {
@@ -87,7 +100,7 @@ namespace geopm
         return result;
     }
 
-    int ProfileIOGroup::control_domain_type(const std::string &control_name)
+    int ProfileIOGroup::control_domain_type(const std::string &control_name) const
     {
         return PlatformTopo::M_DOMAIN_INVALID;
     }
@@ -120,6 +133,11 @@ namespace geopm
                 case M_SIGNAL_PROGRESS:
                     m_do_read_progress = true;
                     break;
+                case M_SIGNAL_RUNTIME:
+                    // Runtime signal requires region_id as well
+                    m_do_read_region_id = true;
+                    m_do_read_runtime = true;
+                    break;
                 default:
                     break;
             }
@@ -142,6 +160,21 @@ namespace geopm
             struct geopm_time_s read_time;
             geopm_time(&read_time);
             m_per_cpu_progress = m_profile_sample->per_cpu_progress(read_time);
+        }
+        if (m_do_read_runtime) {
+            std::map<uint64_t, std::vector<double> > cache;
+            for (auto rid : m_per_cpu_region_id) {
+                // add runtimes for each region if not already present
+                auto it = cache.find(rid);
+                if (it == cache.end()) {
+                    cache.emplace(std::piecewise_construct,
+                                  std::forward_as_tuple(rid),
+                                  std::forward_as_tuple(m_profile_runtime->per_cpu_runtime(rid)));
+                }
+            }
+            for (size_t cpu = 0; cpu < m_per_cpu_runtime.size(); ++cpu) {
+                m_per_cpu_runtime[cpu] = cache.at(m_per_cpu_region_id[cpu])[cpu];
+            }
         }
         m_is_batch_read = true;
     }
@@ -172,6 +205,9 @@ namespace geopm
             case M_SIGNAL_PROGRESS:
                 result = m_per_cpu_progress[cpu_idx];
                 break;
+            case M_SIGNAL_RUNTIME:
+                result = m_per_cpu_runtime[cpu_idx];
+                break;
             default:
 #ifdef GEOPM_DEBUG
                 throw Exception("ProfileIOGroup:sample(): Signal was pushed with an invalid signal type",
@@ -186,7 +222,7 @@ namespace geopm
     void ProfileIOGroup::adjust(int control_idx, double setting)
     {
         throw Exception("ProfileIOGroup::adjust() there are no controls supported by the ProfileIOGroup",
-                         GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+                        GEOPM_ERROR_INVALID, __FILE__, __LINE__);
     }
 
     double ProfileIOGroup::read_signal(const std::string &signal_name, int domain_type, int domain_idx)
@@ -195,6 +231,7 @@ namespace geopm
         /// @todo Add support for non-cpu domains.
         int cpu_idx = domain_idx;
         struct geopm_time_s read_time;
+        uint64_t region_id;
         double result = NAN;
         switch (signal_type) {
             case M_SIGNAL_REGION_ID:
@@ -203,6 +240,10 @@ namespace geopm
             case M_SIGNAL_PROGRESS:
                 geopm_time(&read_time);
                 result = m_profile_sample->per_cpu_progress(read_time)[cpu_idx];
+                break;
+            case M_SIGNAL_RUNTIME:
+                region_id = m_profile_sample->per_cpu_region_id()[cpu_idx];
+                result = m_profile_runtime->per_cpu_runtime(region_id)[cpu_idx];
                 break;
             default:
 #ifdef GEOPM_DEBUG
@@ -220,12 +261,12 @@ namespace geopm
                         GEOPM_ERROR_INVALID, __FILE__, __LINE__);
     }
 
-    int ProfileIOGroup::check_signal(const std::string &signal_name, int domain_type, int domain_idx)
+    int ProfileIOGroup::check_signal(const std::string &signal_name, int domain_type, int domain_idx) const
     {
         if (!is_valid_signal(signal_name)) {
             throw Exception("ProfileIOGroup::check_signal(): signal_name " + signal_name +
                             " not valid for ProfileIOGroup",
-                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
         if (domain_type != PlatformTopo::M_DOMAIN_CPU) {
             /// @todo Add support for non-cpu domains.

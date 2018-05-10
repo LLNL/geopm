@@ -234,13 +234,51 @@ TEST_F(MSRTest, msr_overflow)
                          .units     = IMSR::M_UNITS_NONE,
                          .scalar    = 1.0});
     MSR msr("msr4", 0, {signal}, {});
+    double last_value = 0.0;
 
-    double raw_value = msr.signal(0, 5, 0);
+    // no overflow
+    double raw_value = msr.signal(0, 5, last_value);
     EXPECT_DOUBLE_EQ(5.0, raw_value);
 
+
     // overflowed
-    double of_value = msr.signal(0, 5, 9);
+    last_value = 10;
+    double of_value = msr.signal(0, 5, last_value);
     EXPECT_DOUBLE_EQ(20.0, of_value);  // 5 + (16 -1)
+
+    // multiple overflow
+    last_value = 25;
+    of_value = msr.signal(0, 6, last_value);
+    EXPECT_DOUBLE_EQ(36.0, of_value);  // 6 + 15 + 15
+    last_value = 39;
+    of_value = msr.signal(0, 7, last_value);
+    EXPECT_DOUBLE_EQ(52.0, of_value);  // 7 + 15 + 15 + 15
+}
+
+TEST_F(MSRTest, msr_64_bit)
+{
+    auto signal = std::pair<std::string, struct IMSR::m_encode_s>
+                     ("sig5", (struct IMSR::m_encode_s) {
+                         .begin_bit = 0,
+                         .end_bit   = 64,
+                         .domain    = IPlatformTopo::M_DOMAIN_CPU,
+                         .function  = IMSR::M_FUNCTION_NORMALIZE_64,
+                         .units     = IMSR::M_UNITS_NONE,
+                         .scalar    = 1.0});
+    MSR msr("msr5", 0, {signal}, {});
+    // history must be stored in signal
+    MSRSignal sig(msr, IPlatformTopo::M_DOMAIN_CPU, 0, 0);
+    uint64_t signal_field = 0x5555666677778888;
+    sig.map_field(&signal_field);
+    double result = sig.sample();
+    EXPECT_EQ(0.0, result);
+    // future samples should use same baseline
+    signal_field = 0x5555666677779999;
+    result = sig.sample();
+    EXPECT_DOUBLE_EQ(0x1111, result);
+    signal_field = 0x555566667777aaaa;
+    result = sig.sample();
+    EXPECT_DOUBLE_EQ(0x2222, result);
 }
 
 TEST_F(MSRTest, msr_signal)
@@ -253,7 +291,7 @@ TEST_F(MSRTest, msr_signal)
 
     EXPECT_EQ((m_msr_names[msr_idx] + ":" + m_signal_names[sig_idx]), sig.name());
     EXPECT_EQ(IPlatformTopo::M_DOMAIN_CPU, sig.domain_type());
-    EXPECT_EQ(m_cpu_idx, sig.domain_idx());
+    EXPECT_EQ(m_cpu_idx, sig.cpu_idx());
     /// @todo check exception mesage for field mapping error.
     EXPECT_THROW(sig.sample(), geopm::Exception);
     uint64_t offset = sig.offset();
@@ -273,7 +311,7 @@ TEST_F(MSRTest, msr_control)
 
     EXPECT_EQ((m_msr_names[msr_idx] + ":" + m_control_names[con_idx]), con.name());
     EXPECT_EQ(IPlatformTopo::M_DOMAIN_CPU, con.domain_type());
-    EXPECT_EQ(m_cpu_idx, con.domain_idx());
+    EXPECT_EQ(m_cpu_idx, con.cpu_idx());
     EXPECT_THROW(con.adjust(m_control_value), geopm::Exception);
     uint64_t offset = con.offset();
     EXPECT_EQ(m_msr_offsets[msr_idx], offset);

@@ -63,8 +63,8 @@ namespace geopm
     class IProfileTable
     {
         public:
-            IProfileTable() {}
-            virtual ~IProfileTable() {}
+            IProfileTable() = default;
+            virtual ~IProfileTable() = default;
             /// @brief Hash the name string into a random 64 bit
             ///        integer.
             ///
@@ -188,7 +188,7 @@ namespace geopm
             ///        address range used for storing the data.
             ProfileTable(size_t size, void *buffer);
             /// ProfileTable destructor, virtual.
-            virtual ~ProfileTable();
+            virtual ~ProfileTable() = default;
             uint64_t key(const std::string &name) override;
             void insert(uint64_t key, const struct geopm_prof_message_s &value) override;
             size_t capacity(void) const override;
@@ -196,7 +196,7 @@ namespace geopm
             void dump(std::vector<std::pair<uint64_t, struct geopm_prof_message_s> >::iterator content, size_t &length) override;
             bool name_fill(size_t header_offset) override;
             bool name_set(size_t header_offset, std::set<std::string> &name) override;
-        protected:
+        private:
             virtual bool sticky(const struct geopm_prof_message_s &value);
             enum {
                 M_TABLE_DEPTH_MAX = 16,

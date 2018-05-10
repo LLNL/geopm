@@ -30,6 +30,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef MOCKPLATFORMIO_HPP_INCLUDE
+#define MOCKPLATFORMIO_HPP_INCLUDE
 
 #include "PlatformIO.hpp"
 #include "IOGroup.hpp"
@@ -37,18 +39,23 @@
 class MockPlatformIO : public geopm::IPlatformIO
 {
     public:
-        // workaround for noncopyable parameter with gmock
-        void register_iogroup(std::unique_ptr<geopm::IOGroup> iogroup) override {
-            register_iogroup_mock(iogroup.get());
-        }
-        MOCK_METHOD1(register_iogroup_mock,
-                     void(geopm::IOGroup *iogroup));
+        MOCK_METHOD1(register_iogroup,
+                     void(std::shared_ptr<geopm::IOGroup> iogroup));
+        MOCK_CONST_METHOD0(signal_names,
+                           std::set<std::string>(void));
+        MOCK_CONST_METHOD0(control_names,
+                           std::set<std::string>(void));
         MOCK_CONST_METHOD1(signal_domain_type,
                            int(const std::string &signal_name));
         MOCK_CONST_METHOD1(control_domain_type,
                            int(const std::string &control_name));
         MOCK_METHOD3(push_signal,
                      int(const std::string &signal_name, int domain_type, int domain_idx));
+        MOCK_METHOD4(push_combined_signal,
+                     int(const std::string &signal_name, int domain_type, int domain_idx,
+                         const std::vector<int> &sub_signal_idx));
+        MOCK_METHOD3(push_region_signal_total,
+                     void(int signal_idx, int domain_type, int domain_idx));
         MOCK_METHOD3(push_control,
                      int(const std::string &control_name, int domain_type, int domain_idx));
         MOCK_CONST_METHOD0(num_signal,
@@ -57,6 +64,8 @@ class MockPlatformIO : public geopm::IPlatformIO
                            int(void));
         MOCK_METHOD1(sample,
                      double(int signal_idx));
+        MOCK_METHOD2(sample_region_total,
+                     double(int signal_idx, uint64_t region_id));
         MOCK_METHOD2(adjust,
                      void(int control_idx, double setting));
         MOCK_METHOD0(read_batch,
@@ -67,4 +76,8 @@ class MockPlatformIO : public geopm::IPlatformIO
                      double(const std::string &signal_name, int domain_type, int domain_idx));
         MOCK_METHOD4(write_control,
                      void(const std::string &control_name, int domain_type, int domain_idx, double setting));
+        MOCK_CONST_METHOD1(agg_function,
+                           std::function<double(const std::vector<double> &)>(std::string));
 };
+
+#endif

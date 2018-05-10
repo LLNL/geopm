@@ -30,6 +30,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef MOCKPLATFORMTOPO_HPP_INCLUDE
+#define MOCKPLATFORMTOPO_HPP_INCLUDE
+
 #include "PlatformTopo.hpp"
 
 class MockPlatformTopo : public geopm::IPlatformTopo
@@ -43,5 +46,8 @@ class MockPlatformTopo : public geopm::IPlatformTopo
                            int(int domain_type, int cpu_idx));
         MOCK_METHOD1(define_cpu_group,
                      int(const std::vector<int> &cpu_domain_idx));
+        MOCK_METHOD2(is_domain_within,
+                     bool(int inner_domain, int outer_domain));
 };
 
+#endif

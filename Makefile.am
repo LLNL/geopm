@@ -69,7 +69,9 @@ dist: dist-googletest dist-openmp
 
 
 include_HEADERS = src/geopm.h \
+                  src/geopm_agent.h \
                   src/geopm_ctl.h \
+                  src/geopm_endpoint.h \
                   src/geopm_error.h \
                   src/geopm_policy.h \
                   src/geopm_message.h \
@@ -90,10 +92,15 @@ endif
 endif
 
 ronn_man = man/geopm.7 \
+           man/geopmagent.1 \
+           man/geopm_agent_c.3 \
+           man/geopm_agent_monitor.7 \
            man/geopmanalysis.1 \
            man/geopmbench.1 \
            man/geopmctl.1 \
            man/geopm_ctl_c.3 \
+           man/geopmendpoint.1 \
+           man/geopm_endpoint_c.3 \
            man/geopm_error.3 \
            man/geopm_fortran.3 \
            man/geopmplotter.1 \
@@ -147,6 +154,11 @@ EXTRA_DIST = .gitignore \
              MANIFEST \
              pull_request_template.md \
              README.md \
+             ronn/geopmagent.1.ronn \
+             ronn/geopm_agent_c.3.ronn \
+             ronn/geopm_agent_monitor.7.ronn \
+             ronn/geopmendpoint.1.ronn \
+             ronn/geopm_endpoint_c.3.ronn \
              ronn/geopm.7.ronn \
              ronn/geopmanalysis.1.ronn \
              ronn/geopmbench.1.ronn \
@@ -252,13 +264,19 @@ geopmpolicy_LDADD = libgeopmpolicy.la
 if ENABLE_MPI
     geopmctl_LDADD = libgeopm.la $(MPI_CLIBS)
     geopmbench_LDADD = libgeopm.la $(MPI_CLIBS)
-    libgeopm_la_LIBADD = libgeopmpolicy.la $(MPI_CLIBS)
+    libgeopm_la_LIBADD = $(MPI_CLIBS)
 if ENABLE_FORTRAN
     libgeopmfort_la_LIBADD = libgeopm.la $(MPI_FLIBS)
 endif
 endif
 
-libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
+libgeopmpolicy_la_SOURCES = src/Agent.cpp \
+                            src/Agent.hpp \
+                            src/ApplicationIO.cpp \
+                            src/ApplicationIO.hpp \
+                            src/BalancingAgent.hpp \
+                            src/BalancingAgent.cpp \
+                            src/CircularBuffer.hpp \
                             src/CombinedSignal.cpp \
                             src/CombinedSignal.hpp \
                             src/Comm.cpp \
@@ -267,19 +285,27 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/Controller.hpp \
                             src/ControlMessage.cpp \
                             src/ControlMessage.hpp \
+                            src/CpuinfoIOGroup.cpp \
+                            src/CpuinfoIOGroup.hpp \
                             src/Decider.cpp \
                             src/Decider.hpp \
                             src/DefaultProfile.cpp \
                             src/Environment.cpp \
+                            src/EnergyEfficientAgent.cpp \
+                            src/EnergyEfficientAgent.hpp \
+                            src/EnergyEfficientRegion.cpp \
+                            src/EnergyEfficientRegion.hpp \
+                            src/EpochRuntimeRegulator.cpp \
+                            src/EpochRuntimeRegulator.hpp \
                             src/Exception.cpp \
                             src/Exception.hpp \
                             src/GlobalPolicy.cpp \
                             src/GlobalPolicy.hpp \
                             src/IOGroup.cpp \
                             src/IOGroup.hpp \
-                            src/CpuinfoIOGroup.cpp \
-                            src/CpuinfoIOGroup.hpp \
                             src/geopm.h \
+                            src/geopm_agent.h \
+                            src/geopm_endpoint.h \
                             src/geopm_env.h \
                             src/geopm_error.h \
                             src/geopm_hash.c \
@@ -295,8 +321,15 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/geopm_version.c \
                             src/geopm_version.h \
                             src/geopm_policy.h \
+                            src/Helper.hpp \
+                            src/ManagerIO.cpp \
+                            src/ManagerIO.hpp \
                             src/KNLPlatformImp.cpp \
                             src/KNLPlatformImp.hpp \
+                            src/Kontroller.cpp \
+                            src/Kontroller.hpp \
+                            src/MonitorAgent.cpp \
+                            src/MonitorAgent.hpp \
                             src/MSR.cpp \
                             src/MSR.hpp \
                             src/MSRIO.cpp \
@@ -332,8 +365,12 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/PowerPlatformImp.hpp \
                             src/ProfileIOSample.cpp \
                             src/ProfileIOSample.hpp \
+                            src/ProfileIO.cpp \
+                            src/ProfileIO.hpp \
                             src/ProfileIOGroup.cpp \
                             src/ProfileIOGroup.hpp \
+                            src/ProfileIOSample.cpp \
+                            src/ProfileIOSample.hpp \
                             src/ProfileTable.cpp \
                             src/ProfileTable.hpp \
                             src/ProfileThread.cpp \
@@ -346,6 +383,8 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/OCCPlatform.hpp \
                             src/Region.cpp \
                             src/Region.hpp \
+                            src/Reporter.cpp \
+                            src/Reporter.hpp \
                             src/RuntimeRegulator.cpp \
                             src/RuntimeRegulator.hpp \
                             src/SampleRegulator.cpp \
@@ -361,17 +400,32 @@ libgeopmpolicy_la_SOURCES = src/CircularBuffer.hpp \
                             src/TimeIOGroup.hpp \
                             src/Tracer.cpp \
                             src/Tracer.hpp \
+                            src/TreeComm.cpp \
+                            src/TreeComm.hpp \
+                            src/TreeCommLevel.cpp \
+                            src/TreeCommLevel.hpp \
                             src/TreeCommunicator.cpp \
                             src/TreeCommunicator.hpp \
                             src/XeonPlatformImp.cpp \
                             src/XeonPlatformImp.hpp \
                             contrib/json11/json11.cpp \
                             contrib/json11/json11.hpp \
+<<<<<<< HEAD
                             src/crc32.S \
                             src/crc32_wrapper.c \
                             src/crc32_constants.h \
                             src/ppc-opcode.h \
                             src/geopm_arch.h \
+=======
+                            src/KprofileIOGroup.cpp \
+                            src/KprofileIOGroup.hpp \
+                            src/KprofileIOSample.cpp \
+                            src/KprofileIOSample.hpp \
+                            src/KruntimeRegulator.cpp \
+                            src/KruntimeRegulator.hpp \
+                            src/ProfileIORuntime.cpp \
+                            src/ProfileIORuntime.hpp \
+>>>>>>> upstream/dev
                             # end
 
 geopmpolicy_SOURCES = src/geopmpolicy_main.c \
@@ -382,8 +436,11 @@ geopmpolicy_SOURCES = src/geopmpolicy_main.c \
 
 if ENABLE_MPI
     # All source files that are compiled into libgeopmpolicy are also
-    # compiled into libgeopm.
-    libgeopm_la_SOURCES = src/geopm_ctl.h \
+    # compiled into libgeopm.  We either have to do this or require
+    # users to link to both libgeopm and libgeopmpolicy when calling
+    # into application facing APIs.
+    libgeopm_la_SOURCES = $(libgeopmpolicy_la_SOURCES) \
+                          src/geopm_ctl.h \
                           src/geopm_mpi_comm_split.h \
                           src/geopm_pmpi.h \
                           src/geopm_pmpi.c \

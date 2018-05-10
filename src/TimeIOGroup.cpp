@@ -49,22 +49,27 @@ namespace geopm
         geopm_time(&m_time_zero);
     }
 
-    TimeIOGroup::~TimeIOGroup()
+    std::set<std::string> TimeIOGroup::signal_names(void) const
     {
-
+        return m_valid_signal_name;
     }
 
-    bool TimeIOGroup::is_valid_signal(const std::string &signal_name)
+    std::set<std::string> TimeIOGroup::control_names(void) const
+    {
+        return {};
+    }
+
+    bool TimeIOGroup::is_valid_signal(const std::string &signal_name) const
     {
         return m_valid_signal_name.find(signal_name) != m_valid_signal_name.end();
     }
 
-    bool TimeIOGroup::is_valid_control(const std::string &control_name)
+    bool TimeIOGroup::is_valid_control(const std::string &control_name) const
     {
         return false;
     }
 
-    int TimeIOGroup::signal_domain_type(const std::string &signal_name)
+    int TimeIOGroup::signal_domain_type(const std::string &signal_name) const
     {
         int result = PlatformTopo::M_DOMAIN_INVALID;
         if (is_valid_signal(signal_name)) {
@@ -73,7 +78,7 @@ namespace geopm
         return result;
     }
 
-    int TimeIOGroup::control_domain_type(const std::string &control_name)
+    int TimeIOGroup::control_domain_type(const std::string &control_name) const
     {
         return PlatformTopo::M_DOMAIN_INVALID;
     }
@@ -83,7 +88,7 @@ namespace geopm
         if (!is_valid_signal(signal_name)) {
             throw Exception("TimeIOGroup::push_signal(): signal_name " + signal_name +
                             " not valid for TimeIOGroup",
-                             GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+                            GEOPM_ERROR_INVALID, __FILE__, __LINE__);
         }
         if (m_is_batch_read) {
             throw Exception("TimeIOGroup::push_signal(): cannot push signal after call to read_batch().",
@@ -134,7 +139,7 @@ namespace geopm
     void TimeIOGroup::adjust(int batch_idx, double setting)
     {
         throw Exception("TimeIOGroup::adjust(): there are no controls supported by the TimeIOGroup",
-                         GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+                        GEOPM_ERROR_INVALID, __FILE__, __LINE__);
     }
 
     double TimeIOGroup::read_signal(const std::string &signal_name, int domain_type, int domain_idx)

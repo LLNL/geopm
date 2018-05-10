@@ -41,6 +41,7 @@
 
 #include "geopm_time.h"
 #include "geopm_message.h"
+#include "geopm_plugin.h"
 
 namespace geopm
 {
@@ -59,6 +60,7 @@ namespace geopm
     class IComm;
     class RuntimeRegulator;
     class IProfileIOSample;
+    class IProfileIORuntime;
 
     /// @brief Class used to launch or step the global extensible
     ///        open power manager algorithm.
@@ -168,7 +170,7 @@ namespace geopm
             /// all MSR values that GEOPM can alter to the value that was
             /// read at GEOPM startup.
             void reset(void);
-        protected:
+        private:
             enum m_controller_const_e {
                 M_MAX_FAN_OUT = 16,
                 M_SHMEM_REGION_SIZE = 12288,
@@ -176,6 +178,7 @@ namespace geopm
             void signal_handler(void);
             void check_signal(void);
             void connect(void);
+            void init_decider(void);
             void walk_down(void);
             void walk_up(void);
             void override_telemetry(double progress);
@@ -227,6 +230,8 @@ namespace geopm
             int m_ppn1_rank;
             std::map<uint64_t, RuntimeRegulator> m_rid_regulator_map;
             std::shared_ptr<IProfileIOSample> m_profile_io_sample;
+            std::shared_ptr<IProfileIORuntime> m_profile_io_runtime;
+            struct geopm_plugin_description_s m_plugin_desc;
     };
 }
 

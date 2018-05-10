@@ -63,11 +63,6 @@ namespace geopm
         parse_lscpu_numa(lscpu_map, m_numa_map);
     }
 
-    PlatformTopo::~PlatformTopo()
-    {
-
-    }
-
     int PlatformTopo::num_domain(int domain_type) const
     {
         int result = 0;
@@ -103,12 +98,15 @@ namespace geopm
             case M_DOMAIN_BOARD_ACCELERATOR:
             case M_DOMAIN_PACKAGE_ACCELERATOR:
                 /// @todo Add support for NIC and accelerators to PlatformTopo.
-                throw Exception("PlatformTopo::num_domain() no support yet for NIC or ACCELERATOR",
+                throw Exception("PlatformTopo::num_domain(): no support yet for NIC or ACCELERATOR",
                                 GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
                 break;
             case M_DOMAIN_INVALID:
+                throw Exception("PlatformTopo::num_domain(): invalid domain specified",
+                                GEOPM_ERROR_INVALID, __FILE__, __LINE__);
+                break;
             default:
-                throw Exception("PlatformTopo::num_domain() invalid domain specified",
+                throw Exception("PlatformTopo::num_domain(): invalid domain specified",
                                 GEOPM_ERROR_INVALID, __FILE__, __LINE__);
                 break;
         }
@@ -119,9 +117,44 @@ namespace geopm
                                    int domain_idx,
                                    std::set<int> &cpu_idx) const
     {
-        /// @todo Add support for domain_cpus() method
-        throw Exception("PlatformTopo::domain_cpus(): method not yet implemented",
-                        GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
+        cpu_idx.clear();
+        switch (domain_type) {
+            case M_DOMAIN_BOARD:
+                for (auto numa_cpus : m_numa_map) {
+                    cpu_idx.insert(numa_cpus.begin(), numa_cpus.end());
+                }
+                break;
+            case M_DOMAIN_PACKAGE:
+                for (int thread_idx = 0;
+                     thread_idx != m_thread_per_core;
+                     ++thread_idx) {
+                    for (int core_idx = domain_idx * m_core_per_package;
+                         core_idx != (domain_idx + 1) * m_core_per_package;
+                         ++core_idx) {
+                        cpu_idx.insert(core_idx + thread_idx * m_core_per_package * m_num_package);
+                    }
+                }
+                break;
+            case M_DOMAIN_CORE:
+                for (int thread_idx = 0;
+                     thread_idx != m_thread_per_core;
+                     ++thread_idx) {
+                    cpu_idx.insert(domain_idx + thread_idx * m_core_per_package * m_num_package);
+                }
+                break;
+            case M_DOMAIN_CPU:
+                cpu_idx.insert(domain_idx);
+                break;
+            case M_DOMAIN_BOARD_MEMORY:
+                cpu_idx = m_numa_map[domain_idx];
+                break;
+            default:
+                throw Exception("PlatformTopo::domain_cpus(domain_type=" +
+                                std::to_string(domain_type) +
+                                ") support not yet implemented",
+                                GEOPM_ERROR_NOT_IMPLEMENTED, __FILE__, __LINE__);
+                break;
+        }
     }
 
     int PlatformTopo::define_cpu_group(const std::vector<int> &cpu_domain_idx)
@@ -193,61 +226,96 @@ namespace geopm
         return result;
     }
 
-
+    bool PlatformTopo::is_domain_within(int inner_domain, int outer_domain)
+    {
+        bool result = false;
+        static const std::set<int> package_domain = {
+            M_DOMAIN_CPU,
+            M_DOMAIN_CORE,
+            M_DOMAIN_PACKAGE_MEMORY,
+            M_DOMAIN_PACKAGE_NIC,
+            M_DOMAIN_PACKAGE_ACCELERATOR,
+        };
+        if (inner_domain == outer_domain) {
+            result = true;
+        }
+        else if (outer_domain == M_DOMAIN_BOARD) {
+            // All domains are within the board domain
+            result = true;
+        }
+        else if (outer_domain == M_DOMAIN_CORE &&
+                 inner_domain == M_DOMAIN_CPU) {
+            // Only the CPU domain is within the core.
+            result = true;
+        }
+        else if (outer_domain == M_DOMAIN_PACKAGE &&
+                 package_domain.find(inner_domain) != package_domain.end()) {
+            // Everything under the package scope is in the package_domain set.
+            result = true;
+        }
+        else if (outer_domain == M_DOMAIN_BOARD_MEMORY &&
+                 inner_domain == M_DOMAIN_CPU) {
+            // To support mapping CPU signals to DRAM domain (e.g. power)
+            result = true;
+        }
+        return result;
+    }
 
     void PlatformTopo::parse_lscpu(const std::map<std::string, std::string> &lscpu_map,
                                    int &num_package,
                                    int &core_per_package,
                                    int &thread_per_core)
     {
-        const std::string keys[5] = {"CPU(s)",
+        const std::string keys[6] = {"CPU(s)",
                                      "Thread(s) per core",
                                      "Core(s) per socket",
                                      "Socket(s)",
-                                     "NUMA node(s)"};
-        int values[5] = {};
-        const int num_values = sizeof(values) / sizeof(values[0]);
+                                     "NUMA node(s)",
+                                     "On-line CPU(s) mask"};
+        std::vector<std::string> values(6);
 
-        for (int i = 0; i < num_values; ++i) {
+        for (size_t i = 0; i < values.size(); ++i) {
             auto it = lscpu_map.find(keys[i]);
             if (it == lscpu_map.end()) {
                 throw Exception("PlatformTopo: parsing lscpu output, key not found: \"" + keys[i] + "\"",
                                 GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
             }
-            values[i] = atoi(it->second.c_str());
-            if (!values[i]) {
-                throw Exception("PlatformTopo: parsing lscpu output, value not converted: " + it->second,
+            values[i] = it->second;
+            if (values[i].size() == 0) {
+                throw Exception("PlatformTopo: parsing lscpu output, value not recorded: " + it->second,
                                 GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
             }
         }
-        num_package = values[3];
-        int num_core = values[2] * num_package;
+        num_package = atoi(values[3].c_str());
+        int num_core = atoi(values[2].c_str()) * num_package;
         core_per_package = num_core / num_package;
-        thread_per_core = values[1];
+        thread_per_core = atoi(values[1].c_str());
 
-	int total_cores = num_package * core_per_package * thread_per_core;
-        if (total_cores != values[0]) {
-	    /* check now how many CPUs are actually online */
-	    const std::string online_cpus_string = "On-line CPU(s) mask";
-	    auto it = lscpu_map.find(online_cpus_string);
-	    if(it == lscpu_map.end()) 
-	      throw Exception("PlatformTopo: parsing lscpu output, key not found: \"" + online_cpus_string + "\"",
-			      GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
-	    const std::string online_cpus_mask = it->second;
+        int total_cores_expected_online = num_package * core_per_package * thread_per_core;
+        if (total_cores_expected_online != atoi(values[0].c_str())) {
+            // Check how many CPUs are actually online
+            std::string online_cpu_mask = values[5];
 
-	    /* read backwards until we reach 'x' */
-	    int idx = online_cpus_mask.length() - 1;
-	    int online_cpus = 0;
-	    while(online_cpus_mask.at(idx) != 'x') {
-	      const char m = online_cpus_mask.at(idx--);
-	      int mask =  atoi(&m);
-	      for(int i = 0; i < 4; ++i)
-		online_cpus += (mask >> i) & 0x1;
-	    }
-	    
-	    if(total_cores != online_cpus)
-	      throw Exception("PlatformTopo: parsing lscpu output, inconsistent values or some CPUs are not online",
-			      GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+            if (online_cpu_mask.size() < 2 ||
+                online_cpu_mask.substr(0,2) != "0x") {
+                throw Exception("PlatformTopo: parsing lscpu output, online CPU mask does not begin with 0x",
+                                GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+            }
+            online_cpu_mask = online_cpu_mask.substr(2);
+            int online_cpus = 0;
+            for (auto hmc = online_cpu_mask.rbegin(); hmc != online_cpu_mask.rend(); ++hmc) {
+                uint32_t hmb = std::stoul(std::string(1, *hmc), 0, 16);
+                for (int bit_idx = 0; bit_idx != 4; ++bit_idx) {
+                    if (hmb & 1U) {
+                        ++online_cpus;
+                    }
+                    hmb = hmb >> 1;
+                }
+            }
+            if (total_cores_expected_online != online_cpus) {
+                throw Exception("PlatformTopo: parsing lscpu output, inconsistent values or unable to determine online CPUs",
+                                GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+            }
         }
     }
 

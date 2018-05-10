@@ -64,7 +64,7 @@ namespace geopm
     {
         public:
             TreeCommunicatorLevel(std::shared_ptr<IComm> comm);
-            ~TreeCommunicatorLevel();
+            virtual ~TreeCommunicatorLevel();
             /// Check sample mailbox for each child and if all are full copy
             /// them into sample and reset values in mailbox, otherwise throw
             /// geopm::Exception with err_value() of
@@ -84,7 +84,7 @@ namespace geopm
             int level_rank(void);
             /// Returns number of bytes transfered over the network so far.
             size_t overhead_send(void);
-        protected:
+        private:
             void create_window(void);
             std::shared_ptr<IComm> m_comm;
             int m_size;
@@ -166,9 +166,7 @@ namespace geopm
         comm->barrier();
     }
 
-    TreeCommunicator::~TreeCommunicator()
-    {
-    }
+    TreeCommunicator::~TreeCommunicator() = default;
 
     int TreeCommunicator::num_level(void) const
     {
@@ -405,11 +403,6 @@ namespace geopm
     SingleTreeCommunicator::SingleTreeCommunicator(IGlobalPolicy *global_policy)
         : m_policy(global_policy)
         , m_sample(GEOPM_SAMPLE_INVALID)
-    {
-
-    }
-
-    SingleTreeCommunicator::~SingleTreeCommunicator()
     {
 
     }

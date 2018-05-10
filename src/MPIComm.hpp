@@ -44,6 +44,8 @@
 
 namespace geopm
 {
+    /// @brief Implementation of the IComm interface using MPI as the
+    ///        underlying communication mechanism.
     class MPIComm : public IComm
     {
         public:
@@ -64,6 +66,7 @@ namespace geopm
             virtual std::shared_ptr<IComm> split(int color, int key) const override;
             virtual std::shared_ptr<IComm> split(const std::string &tag, int split_type) const override;
             virtual std::shared_ptr<IComm> split(std::vector<int> dimensions, std::vector<int> periods, bool is_reorder) const override;
+            virtual std::shared_ptr<IComm> split_cart(std::vector<int> dimensions) const override;
 
             virtual bool comm_supported(const std::string &description) const override;
 
@@ -76,6 +79,7 @@ namespace geopm
             virtual size_t window_create(size_t size, void *base) override;
             virtual void window_destroy(size_t window_id) override;
             virtual void coordinate(int rank, std::vector<int> &coord) const override;
+            virtual std::vector<int> coordinate(int rank) const override;
             virtual void window_lock(size_t window_id, bool is_exclusive, int rank, int assert) const override;
             virtual void window_unlock(size_t window_id, int rank) const override;
             virtual void barrier(void) const override;
@@ -83,9 +87,9 @@ namespace geopm
             virtual bool test(bool is_true) const override;
             virtual void reduce_max(double *send_buf, double *recv_buf, size_t count, int root) const override;
             virtual void gather(const void *send_buf, size_t send_size, void *recv_buf,
-                    size_t recv_size, int root) const override;
+                                size_t recv_size, int root) const override;
             virtual void gatherv(const void *send_buf, size_t send_size, void *recv_buf,
-                    const std::vector<size_t> &recv_sizes, const std::vector<off_t> &rank_offset, int root) const override;
+                                 const std::vector<size_t> &recv_sizes, const std::vector<off_t> &rank_offset, int root) const override;
             virtual void window_put(const void *send_buf, size_t send_size, int rank, off_t disp, size_t window_id) const override;
         protected:
             void check_window(size_t window_id) const;

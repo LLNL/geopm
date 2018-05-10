@@ -37,6 +37,7 @@
 #include "PlatformTopo.hpp"
 #include "Exception.hpp"
 
+using geopm::IPlatformTopo;
 using geopm::PlatformTopo;
 using geopm::Exception;
 
@@ -50,6 +51,7 @@ class PlatformTopoTest : public :: testing :: Test
         std::string m_hsw_lscpu_str;
         std::string m_knl_lscpu_str;
         std::string m_bdx_lscpu_str;
+        std::string m_ppc_lscpu_str;
         bool m_do_unlink;
 };
 
@@ -129,6 +131,28 @@ void PlatformTopoTest::SetUp()
         "NUMA node0 CPU(s):     0x3ffff00003ffff\n"
         "NUMA node1 CPU(s):     0xffffc0000ffffc0000\n"
         "Flags:                 fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc aperfmperf eagerfpu pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch epb cat_l3 cdp_l3 invpcid_single intel_pt spec_ctrl ibpb_support tpr_shadow vnmi flexpriority ept vpid fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm cqm rdt_a rdseed adx smap xsaveopt cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local dtherm ida arat pln pts\n";
+    m_ppc_lscpu_str =
+        "Architecture:          ppc64le\n"
+        "Byte Order:            Little Endian\n"
+        "CPU(s):                160\n"
+        "On-line CPU(s) mask:   0x101010101010101010101010101010101010101\n"
+        "Off-line CPU(s) mask:  0xfefefefefefefefefefefefefefefefefefefefe\n"
+        "Thread(s) per core:    1\n"
+        "Core(s) per socket:    10\n"
+        "Socket(s):             2\n"
+        "NUMA node(s):          2\n"
+        "Model:                 1.0 (pvr 004c 0100)\n"
+        "Model name:            POWER8NVL (raw), altivec supported\n"
+        "CPU max MHz:           4023.0000\n"
+        "CPU min MHz:           2394.0000\n"
+        "Hypervisor vendor:     (null)\n"
+        "Virtualization type:   full\n"
+        "L1d cache:             64K\n"
+        "L1i cache:             32K\n"
+        "L2 cache:              512K\n"
+        "L3 cache:              8192K\n"
+        "NUMA node0 CPU(s):     0x1010101010101010101\n"
+        "NUMA node1 CPU(s):     0x101010101010101010100000000000000000000\n";
     m_do_unlink = false;
 }
 
@@ -187,6 +211,18 @@ TEST_F(PlatformTopoTest, bdx_num_domain)
     EXPECT_EQ(2, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_PACKAGE));
     EXPECT_EQ(36, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_CORE));
     EXPECT_EQ(72, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_CPU));
+    EXPECT_EQ(2, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_BOARD_MEMORY));
+    EXPECT_EQ(0, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_PACKAGE_MEMORY));
+}
+
+TEST_F(PlatformTopoTest, ppc_num_domain)
+{
+    write_lscpu(m_ppc_lscpu_str);
+    geopm::PlatformTopo topo(m_lscpu_file_name);
+    EXPECT_EQ(1, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_EQ(2, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_EQ(20, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_CORE));
+    EXPECT_EQ(20, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_CPU));
     EXPECT_EQ(2, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_BOARD_MEMORY));
     EXPECT_EQ(0, topo.num_domain(geopm::IPlatformTopo::M_DOMAIN_PACKAGE_MEMORY));
 }
@@ -257,16 +293,101 @@ TEST_F(PlatformTopoTest, bdx_domain_cpus)
 {
     write_lscpu(m_bdx_lscpu_str);
     geopm::PlatformTopo topo(m_lscpu_file_name);
-    std::set<int> cpu_set_expect = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-                                    36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53};
+    std::set<int> cpu_set_board;
+    std::set<int> cpu_set_socket[2];
+    cpu_set_socket[0] = { 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17,
+                         36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53};
+    cpu_set_socket[1] = {18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+                         54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71};
+    cpu_set_board = cpu_set_socket[0];
+    cpu_set_board.insert(cpu_set_socket[1].begin(), cpu_set_socket[1].end());
+    std::set<int> cpu_set_expect;
     std::set<int> cpu_set_actual;
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_BOARD, 0, cpu_set_actual);
+    EXPECT_EQ(cpu_set_board, cpu_set_actual);
 
-    EXPECT_THROW(topo.domain_cpus(geopm::IPlatformTopo::M_DOMAIN_PACKAGE, 0, cpu_set_actual), geopm::Exception);
-    // Feature not yet implemented, remove line above and uncomment
-    // below when feature is implemented.  Also more tests would be
-    // good.
-    //
-    // EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_PACKAGE, 0, cpu_set_actual);
+    EXPECT_EQ(cpu_set_socket[0], cpu_set_actual);
+
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_PACKAGE, 1, cpu_set_actual);
+    EXPECT_EQ(cpu_set_socket[1], cpu_set_actual);
+
+    cpu_set_expect = {0, 36};
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_CORE, 0, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    cpu_set_expect = {1, 37};
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_CORE, 1, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    cpu_set_expect = {0};
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_CPU, 0, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    cpu_set_expect = {1};
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_CPU, 1, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    cpu_set_expect = cpu_set_socket[0];
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_BOARD_MEMORY, 0, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    cpu_set_expect = cpu_set_socket[1];
+    topo.domain_cpus(IPlatformTopo::M_DOMAIN_BOARD_MEMORY, 1, cpu_set_actual);
+    EXPECT_EQ(cpu_set_expect, cpu_set_actual);
+
+    // TODO: still to be implemented
+    EXPECT_THROW(topo.domain_cpus(IPlatformTopo::M_DOMAIN_PACKAGE_MEMORY, 0, cpu_set_actual), Exception);
+    EXPECT_THROW(topo.domain_cpus(IPlatformTopo::M_DOMAIN_PACKAGE_ACCELERATOR, 0, cpu_set_actual), Exception);
+    EXPECT_THROW(topo.domain_cpus(IPlatformTopo::M_DOMAIN_PACKAGE_NIC, 0, cpu_set_actual), Exception);
+    EXPECT_THROW(topo.domain_cpus(IPlatformTopo::M_DOMAIN_BOARD_NIC, 0, cpu_set_actual), Exception);
+    EXPECT_THROW(topo.domain_cpus(IPlatformTopo::M_DOMAIN_BOARD_ACCELERATOR, 0, cpu_set_actual), Exception);
+
+}
+
+TEST_F(PlatformTopoTest, bdx_is_domain_within)
+{
+    write_lscpu(m_bdx_lscpu_str);
+    geopm::PlatformTopo topo(m_lscpu_file_name);
+
+    // domains containing CPUs
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CPU, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CPU, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CPU, IPlatformTopo::M_DOMAIN_CORE));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CPU, IPlatformTopo::M_DOMAIN_CPU));
+    // needed to support POWER_DRAM signal
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CPU, IPlatformTopo::M_DOMAIN_BOARD_MEMORY));
+
+    // domains containing cores
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CORE, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CORE, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CORE, IPlatformTopo::M_DOMAIN_CORE));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_CORE, IPlatformTopo::M_DOMAIN_CPU));
+
+    // domains containing package
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE, IPlatformTopo::M_DOMAIN_CORE));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE, IPlatformTopo::M_DOMAIN_CPU));
+
+    // domains containing board
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD, IPlatformTopo::M_DOMAIN_CORE));
+    EXPECT_FALSE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD, IPlatformTopo::M_DOMAIN_CPU));
+
+    // other domains in the board
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD_NIC, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD_ACCELERATOR, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_BOARD_MEMORY, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_NIC, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_ACCELERATOR, IPlatformTopo::M_DOMAIN_BOARD));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_MEMORY, IPlatformTopo::M_DOMAIN_BOARD));
+
+    // other domains in the package
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_NIC, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_ACCELERATOR, IPlatformTopo::M_DOMAIN_PACKAGE));
+    EXPECT_TRUE(topo.is_domain_within(IPlatformTopo::M_DOMAIN_PACKAGE_MEMORY, IPlatformTopo::M_DOMAIN_PACKAGE));
 }
 
 TEST_F(PlatformTopoTest, parse_error)

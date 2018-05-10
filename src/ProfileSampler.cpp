@@ -54,6 +54,8 @@
 #include "geopm_signal_handler.h"
 #include "geopm_sched.h"
 #include "geopm_env.h"
+#include "Helper.hpp"
+#include "PlatformTopo.hpp"
 #include "ProfileSampler.hpp"
 #include "ProfileTable.hpp"
 #include "ProfileThread.hpp"
@@ -74,47 +76,47 @@ namespace geopm
     const struct geopm_prof_message_s GEOPM_INVALID_PROF_MSG = {-1, 0, {{0, 0}}, -1.0};
 
     ProfileSampler::ProfileSampler(size_t table_size)
-        : m_table_size(table_size)
+        : ProfileSampler(platform_topo(), table_size)
+    {
+    }
+
+    ProfileSampler::ProfileSampler(IPlatformTopo &topo, size_t table_size)
+        : m_ctl_shmem(nullptr)
+        , m_ctl_msg(nullptr)
+        , m_table_size(table_size)
         , m_do_report(false)
-        , m_tprof_shmem(NULL)
-        , m_tprof_table(NULL)
+        , m_tprof_shmem(nullptr)
+        , m_tprof_table(nullptr)
+        , m_rank_per_node(0)
     {
         std::string sample_key(geopm_env_shmkey());
         sample_key += "-sample";
         std::string sample_key_path("/dev/shm/" + sample_key);
         // Remove shared memory file if one already exists.
         (void)unlink(sample_key_path.c_str());
-        m_ctl_shmem = new SharedMemory(sample_key, table_size);
-        m_ctl_msg = new ControlMessage((struct geopm_ctl_message_s *)m_ctl_shmem->pointer(), true, true);
+        m_ctl_shmem = geopm::make_unique<SharedMemory>(sample_key, sizeof(struct geopm_ctl_message_s));
+        m_ctl_msg = geopm::make_unique<ControlMessage>(*(struct geopm_ctl_message_s *)m_ctl_shmem->pointer(), true, true);
 
         std::string tprof_key(geopm_env_shmkey());
         tprof_key += "-tprof";
         std::string tprof_key_path("/dev/shm/" + tprof_key);
         // Remove shared memory file if one already exists.
         (void)unlink(tprof_key_path.c_str());
-        size_t tprof_size = 64 * geopm_sched_num_cpu();
-        m_tprof_shmem = new SharedMemory(tprof_key, tprof_size);
-        m_tprof_table = new ProfileThreadTable(tprof_size, m_tprof_shmem->pointer());
+        size_t tprof_size = 64 * topo.num_domain(IPlatformTopo::M_DOMAIN_CPU);
+        m_tprof_shmem = geopm::make_unique<SharedMemory>(tprof_key, tprof_size);
+        m_tprof_table = geopm::make_unique<ProfileThreadTable>(tprof_size, m_tprof_shmem->pointer());
         errno = 0; // Ignore errors from the unlink calls.
     }
 
-    ProfileSampler::~ProfileSampler(void)
-    {
-        delete m_tprof_table;
-        delete m_tprof_shmem;
-        for (auto it = m_rank_sampler.begin(); it != m_rank_sampler.end(); ++it) {
-            delete (*it);
-        }
-        delete m_ctl_shmem;
-    }
+    ProfileSampler::~ProfileSampler() = default;
 
-    void ProfileSampler::initialize(int &rank_per_node)
+    void ProfileSampler::initialize(void)
     {
         std::ostringstream shm_key;
 
-        m_ctl_msg->wait();
-        m_ctl_msg->step();
-        m_ctl_msg->wait();
+        m_ctl_msg->wait(); // M_STATUS_MAP_BEGIN
+        m_ctl_msg->step(); // M_STATUS_MAP_BEGIN
+        m_ctl_msg->wait(); // M_STATUS_MAP_END
 
         std::set<int> rank_set;
         for (int i = 0; i < GEOPM_MAX_NUM_CPU; i++) {
@@ -126,34 +128,45 @@ namespace geopm
         for (auto it = rank_set.begin(); it != rank_set.end(); ++it) {
             shm_key.str("");
             shm_key << m_ctl_shmem->key() <<  "-"  << *it;
-            m_rank_sampler.push_front(new ProfileRankSampler(shm_key.str(), m_table_size));
+            m_rank_sampler.push_front(geopm::make_unique<ProfileRankSampler>(shm_key.str(), m_table_size));
         }
-        rank_per_node = rank_set.size();
-        if (rank_per_node == 0) {
+        m_rank_per_node = rank_set.size();
+        if (m_rank_per_node == 0) {
             m_ctl_msg->abort();
             throw Exception("ProfileSampler::initialize(): Application ranks were not listed as running on any CPUs.",
                             GEOPM_ERROR_LOGIC, __FILE__, __LINE__);
         }
-        m_ctl_msg->step();
-        m_ctl_msg->wait();
-        m_ctl_msg->step();
+        m_ctl_msg->step(); // M_STATUS_MAP_END
     }
 
-    void ProfileSampler::cpu_rank(std::vector<int> &cpu_rank)
+    void ProfileSampler::controller_ready(void)
+    {
+        m_ctl_msg->wait();  // M_STATUS_SAMPLE_BEGIN
+        m_ctl_msg->step();  // M_STATUS_SAMPLE_BEGIN
+    }
+
+    int ProfileSampler::rank_per_node(void)
+    {
+        return m_rank_per_node;
+    }
+
+    std::vector<int> ProfileSampler::cpu_rank(void)
     {
         uint32_t num_cpu = geopm_sched_num_cpu();
         unsigned cpu_multiplier = 1;
 #ifdef POWERPC
         cpu_multiplier = geopm_sched_cpu_conf()/(unsigned)num_cpu;
 #endif
-        cpu_rank.resize(num_cpu);
+        std::vector<int> result(num_cpu);
         if (num_cpu > GEOPM_MAX_NUM_CPU) {
-            throw Exception("ProfileSampler::cpu_rank: Number of online CPUs is greater than GEOPM_MAX_NUM_CPU", GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
+            throw Exception("ProfileSampler::cpu_rank: Number of online CPUs is greater than GEOPM_MAX_NUM_CPU",
+                            GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
         }
 
         for (unsigned cpu = 0; cpu < num_cpu; ++cpu) {
-            cpu_rank[cpu] = m_ctl_msg->cpu_rank(cpu*cpu_multiplier);
+            result[cpu] = m_ctl_msg->cpu_rank(cpu);
         }
+        return result;
     }
 
     size_t ProfileSampler::capacity(void)
@@ -179,14 +192,14 @@ namespace geopm
                 content_it += rank_length;
                 length += rank_length;
             }
-            if (m_ctl_msg->is_sample_end()) {
+            if (m_ctl_msg->is_sample_end()) {  // M_STATUS_SAMPLE_END
                 comm->barrier();
                 m_ctl_msg->step();
                 while (!m_ctl_msg->is_name_begin() &&
                        !m_ctl_msg->is_shutdown()) {
                     geopm_signal_handler_check();
                 }
-                if (m_ctl_msg->is_name_begin()) {
+                if (m_ctl_msg->is_name_begin()) {  // M_STATUS_NAME_BEGIN
                     region_names();
                 }
             }
@@ -208,69 +221,67 @@ namespace geopm
 
     void ProfileSampler::region_names(void)
     {
-        m_ctl_msg->step();
+        m_ctl_msg->step();  // M_STATUS_NAME_BEGIN
 
         bool is_all_done = false;
         while (!is_all_done) {
-            m_ctl_msg->loop_begin();
-            m_ctl_msg->wait();
+            m_ctl_msg->loop_begin();  // M_STATUS_NAME_LOOP_BEGIN
+            m_ctl_msg->wait();        // M_STATUS_NAME_LOOP_END
             is_all_done = true;
             for (auto it = m_rank_sampler.begin(); it != m_rank_sampler.end(); ++it) {
                 if (!(*it)->name_fill(m_name_set)) {
                     is_all_done = false;
                 }
             }
-            m_ctl_msg->step();
+            m_ctl_msg->step();  // M_STATUS_NAME_LOOP_END
             if (!is_all_done && m_ctl_msg->is_shutdown()) {
                 throw Exception("ProfileSampler::region_names(): Application shutdown while report was being generated", GEOPM_ERROR_RUNTIME, __FILE__, __LINE__);
             }
         }
         m_rank_sampler.front()->report_name(m_report_name);
         m_rank_sampler.front()->profile_name(m_profile_name);
+        // report and profile names may have been inserted as region names
+        m_name_set.erase(m_report_name);
+        m_name_set.erase(m_profile_name);
+
         m_do_report = true;
 
-        m_ctl_msg->wait();
-        m_ctl_msg->step();
-        m_ctl_msg->wait();
+        m_ctl_msg->wait();  // M_STATUS_NAME_END
+        m_ctl_msg->step();  // M_STATUS_NAME_END
+        m_ctl_msg->wait();  // M_STATUS_SHUTDOWN
     }
 
-    void ProfileSampler::name_set(std::set<std::string> &region_name)
+    std::set<std::string> ProfileSampler::name_set(void)
     {
-        region_name = m_name_set;
+        return m_name_set;
     }
 
-    void ProfileSampler::report_name(std::string &report_str)
+    std::string ProfileSampler::report_name(void)
     {
-        report_str = m_report_name;
+        return m_report_name;
     }
 
-    void ProfileSampler::profile_name(std::string &prof_str)
+    std::string ProfileSampler::profile_name(void)
     {
-        prof_str = m_profile_name;
+        return m_profile_name;
     }
 
-    IProfileThreadTable *ProfileSampler::tprof_table(void)
+    std::shared_ptr<IProfileThreadTable> ProfileSampler::tprof_table(void)
     {
         return m_tprof_table;
     }
 
     ProfileRankSampler::ProfileRankSampler(const std::string shm_key, size_t table_size)
-        : m_table_shmem(NULL)
-        , m_table(NULL)
+        : m_table_shmem(nullptr)
+        , m_table(nullptr)
         , m_region_entry(GEOPM_INVALID_PROF_MSG)
         , m_is_name_finished(false)
     {
         std::string key_path("/dev/shm/" + shm_key);
         (void)unlink(key_path.c_str());
         errno = 0; // Ignore errors from the unlink call.
-        m_table_shmem = new SharedMemory(shm_key, table_size);
-        m_table = new ProfileTable(m_table_shmem->size(), m_table_shmem->pointer());
-    }
-
-    ProfileRankSampler::~ProfileRankSampler()
-    {
-        delete m_table;
-        delete m_table_shmem;
+        m_table_shmem = geopm::make_unique<SharedMemory>(shm_key, table_size);
+        m_table = geopm::make_unique<ProfileTable>(m_table_shmem->size(), m_table_shmem->pointer());
     }
 
     size_t ProfileRankSampler::capacity(void)

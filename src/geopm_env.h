@@ -44,20 +44,23 @@ enum geopm_pmpi_ctl_e {
 };
 
 const char *geopm_env_policy(void);
+const char *geopm_env_agent(void);
 const char *geopm_env_shmkey(void);
 const char *geopm_env_trace(void);
 const char *geopm_env_plugin_path(void);
 const char *geopm_env_report(void);
 const char *geopm_env_comm(void);
 const char *geopm_env_profile(void);
+const char *geopm_env_trace_signal(int);
+int geopm_env_num_trace_signal(void);
 int geopm_env_report_verbosity(void);
 int geopm_env_pmpi_ctl(void);
 int geopm_env_do_region_barrier(void);
 int geopm_env_do_trace(void);
-int geopm_env_do_ignore_affinity(void);
 int geopm_env_do_profile(void);
 int geopm_env_profile_timeout(void);
 int geopm_env_debug_attach(void);
+int geopm_env_do_kontroller(void);
 
 #ifdef __cplusplus
 }

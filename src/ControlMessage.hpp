@@ -29,8 +29,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY LOG OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef CONTROL_MESSAGE_HPP_INCLUDE
-#define CONTROL_MESSAGE_HPP_INCLUDE
+
+#ifndef CONTROLMESSAGE_HPP_INCLUDE
+#define CONTROLMESSAGE_HPP_INCLUDE
 
 #include <stdint.h>
 
@@ -60,8 +61,8 @@ namespace geopm
     class IControlMessage
     {
         public:
-            IControlMessage() {}
-            virtual ~IControlMessage() {}
+            IControlMessage() = default;
+            virtual ~IControlMessage() = default;
             /// @brief Signal an advance to next phase in runtime.
             virtual void step(void) = 0;
             /// @brief Wait for message that other side has advanced
@@ -132,9 +133,9 @@ namespace geopm
             /// the caller is the controller or the lowest application
             /// rank on the node and false if the caller is any other
             /// application rank.
-            ControlMessage(struct geopm_ctl_message_s *ctl_msg, bool is_ctl, bool is_writer);
+            ControlMessage(struct geopm_ctl_message_s &ctl_msg, bool is_ctl, bool is_writer);
             /// @brief ControlMessage virtual destructor
-            virtual ~ControlMessage();
+            virtual ~ControlMessage() = default;
             void step() override;
             void wait() override;
             void abort(void) override;
@@ -150,19 +151,19 @@ namespace geopm
             /// @brief Enum encompassing application and
             /// GEOPM runtime state.
             enum m_status_e {
-                M_STATUS_UNDEFINED = 0,
-                M_STATUS_MAP_BEGIN = 1,
-                M_STATUS_MAP_END = 2,
-                M_STATUS_SAMPLE_BEGIN = 3,
-                M_STATUS_SAMPLE_END = 4,
-                M_STATUS_NAME_BEGIN = 5,
-                M_STATUS_NAME_LOOP_BEGIN = 6,
-                M_STATUS_NAME_LOOP_END = 7,
-                M_STATUS_NAME_END = 8,
-                M_STATUS_SHUTDOWN = 9,
+                M_STATUS_UNDEFINED,
+                M_STATUS_MAP_BEGIN,
+                M_STATUS_MAP_END,
+                M_STATUS_SAMPLE_BEGIN,
+                M_STATUS_SAMPLE_END,
+                M_STATUS_NAME_BEGIN,
+                M_STATUS_NAME_LOOP_BEGIN,
+                M_STATUS_NAME_LOOP_END,
+                M_STATUS_NAME_END,
+                M_STATUS_SHUTDOWN,
                 M_STATUS_ABORT = 9999,
             };
-            struct geopm_ctl_message_s *m_ctl_msg;
+            struct geopm_ctl_message_s &m_ctl_msg;
             bool m_is_ctl;
             bool m_is_writer;
             int m_last_status;

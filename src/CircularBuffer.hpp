@@ -48,8 +48,8 @@ namespace geopm
     class ICircularBuffer
     {
         public:
-            ICircularBuffer() {}
-            virtual ~ICircularBuffer() {}
+            ICircularBuffer() = default;
+            virtual ~ICircularBuffer() = default;
             /// @brief Re-size the circular buffer.
             ///
             /// Resets the capacity of the circular buffer without
@@ -123,7 +123,7 @@ namespace geopm
             int capacity(void) const override;
             void insert(const type value) override;
             const type& value(const unsigned int index) const override;
-        protected:
+        private:
             /// @brief Vector holding the buffer data.
             std::vector<type> m_buffer;
             /// @brief Index of the current head of the buffer.

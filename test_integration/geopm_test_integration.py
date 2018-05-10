@@ -30,6 +30,7 @@
 #  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY LOG OF THE USE
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+
 import os
 import sys
 import unittest
@@ -121,7 +122,8 @@ class TestIntegration(unittest.TestCase):
                     pass
 
     def assertNear(self, a, b, epsilon=0.05):
-        if abs((a - b) / a) >= epsilon:
+        denom = a if a != 0 else 1
+        if abs((a - b) / denom) >= epsilon:
             self.fail('The fractional difference between {a} and {b} is greater than {epsilon}'.format(a=a, b=b, epsilon=epsilon))
 
     def create_progress_df(self, df):
@@ -642,7 +644,12 @@ class TestIntegration(unittest.TestCase):
         for nn in node_names:
             tt = self._output.get_trace(nn)
 
-            first_epoch_index = tt.loc[tt['region_id'] == '9223372036854775808'][:1].index[0]
+            epoch = '9223372036854775808'
+            # todo: hack to run tests with new controller
+            if os.getenv("GEOPM_AGENT") is not None:
+                epoch = '0x8000000000000000'
+
+            first_epoch_index = tt.loc[tt['region_id'] == epoch][:1].index[0]
             epoch_dropped_data = tt[first_epoch_index:]  # Drop all startup data
 
             power_data = epoch_dropped_data.filter(regex='energy')
@@ -841,8 +848,14 @@ class TestIntegration(unittest.TestCase):
         for nn in node_names:
             rr = self._output.get_report(nn)
             region_names = rr.keys()
-            self.assertTrue(stream_name in rr)
-            stream_region = rr[stream_name]
+            found = False
+            full_name = stream_name
+            for name in region_names:
+                if stream_name in name:  # account for numbers at end of OMPT region names
+                    found = True
+                    full_name = name
+            self.assertTrue(found)
+            stream_region = rr[full_name]
             self.assertEqual(1, stream_region.get_count())
             if stream_id:
                 self.assertEqual(stream_id, stream_region.get_id())
@@ -902,15 +915,18 @@ class TestIntegration(unittest.TestCase):
                                                                       '.',
                                                                       num_rank,
                                                                       num_node,
-                                                                      app_argv)
+                                                                      app_argv,
+                                                                      verbose=True)
         analysis.launch()
         parse_output = analysis.parse()
         process_output = analysis.report_process(parse_output)
-        energy_savings_epoch = process_output.loc[name+'_offline']['energy']
-        runtime_savings_epoch = process_output.loc[name+'_offline']['runtime']
+        analysis.report(process_output)
+        sticker_freq_idx = process_output.loc['epoch'].index[-2]
+        energy_savings_epoch = process_output.loc['epoch']['energy_savings'][sticker_freq_idx]
+        runtime_savings_epoch = process_output.loc['epoch']['runtime_savings'][sticker_freq_idx]
 
         self.assertLess(0.0, energy_savings_epoch)
-        self.assertLess(runtime_savings_epoch, 5.0)
+        self.assertLess(-10.0, runtime_savings_epoch)  # want -10% or better
 
     @skip_unless_run_long_tests()
     @skip_unless_platform_bdx()
@@ -959,15 +975,18 @@ class TestIntegration(unittest.TestCase):
                                                                      '.',
                                                                      num_rank,
                                                                      num_node,
-                                                                     app_argv)
+                                                                     app_argv,
+                                                                     verbose=True)
         analysis.launch()
         parse_output = analysis.parse()
         process_output = analysis.report_process(parse_output)
-        energy_savings_epoch = process_output.loc[name+'_online']['energy']
-        runtime_savings_epoch = process_output.loc[name+'_online']['runtime']
+        analysis.report(process_output)
+        sticker_freq_idx = process_output.loc['epoch'].index[-2]
+        energy_savings_epoch = process_output.loc['epoch']['energy_savings'][sticker_freq_idx]
+        runtime_savings_epoch = process_output.loc['epoch']['runtime_savings'][sticker_freq_idx]
 
         self.assertLess(0.0, energy_savings_epoch)
-        self.assertLess(runtime_savings_epoch, 5.0)
+        self.assertLess(-10.0, runtime_savings_epoch)  # want -10% or better
 
     @skip_unless_slurm_batch()
     def test_controller_signal_handling(self):
@@ -1022,39 +1041,6 @@ class TestIntegration(unittest.TestCase):
                 if message in line:
                     found = True
         self.assertTrue(found, "runtime error message not found in log")
-
-    @unittest.skipUnless(False, 'Not implemented')
-    def test_variable_end_time(self):
-        """
-        Check that two ranks on the same node can shutdown at
-        different times without overflowing the table.
-        """
-        raise NotImplementedError
-
-    @unittest.skipUnless(False, 'Not implemented')
-    def test_power_excursion(self):
-        """
-        When a low power region is followed by a high power region, check
-        that the power consumed at beginning of high power region does
-        not excede the RAPL limit for too long.
-        """
-        raise NotImplementedError
-
-    @unittest.skipUnless(False, 'Not implemented')
-    def test_short_region_control(self):
-        """
-        Check that power limit is maintained when an application has many
-        short running regions.
-        """
-        raise NotImplementedError
-
-    @unittest.skipUnless(False, 'Not implemented')
-    def test_mean_power_against_integration(self):
-        """
-        Check that the average of the per sample power is close to the
-        total change in energy divided by the total change in time.
-        """
-        raise NotImplementedError
 
 
 if __name__ == '__main__':

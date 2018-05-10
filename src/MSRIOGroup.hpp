@@ -46,7 +46,9 @@ namespace geopm
     class MSRSignal;
     class MSRControl;
     class IMSRIO;
+    class IPlatformTopo;
 
+    /// @brief IOGroup that provides signals and controls based on MSRs.
     class MSRIOGroup : public IOGroup
     {
         public:
@@ -59,12 +61,14 @@ namespace geopm
             };
 
             MSRIOGroup();
-            MSRIOGroup(std::unique_ptr<IMSRIO> msrio, int cpuid, int num_cpu);
+            MSRIOGroup(IPlatformTopo &platform_topo, std::unique_ptr<IMSRIO> msrio, int cpuid, int num_cpu);
             virtual ~MSRIOGroup();
-            bool is_valid_signal(const std::string &signal_name) override;
-            bool is_valid_control(const std::string &control_name) override;
-            int signal_domain_type(const std::string &signal_name) override;
-            int control_domain_type(const std::string &control_name) override;
+            std::set<std::string> signal_names(void) const override;
+            std::set<std::string> control_names(void) const override;
+            bool is_valid_signal(const std::string &signal_name) const override;
+            bool is_valid_control(const std::string &control_name) const override;
+            int signal_domain_type(const std::string &signal_name) const override;
+            int control_domain_type(const std::string &control_name) const override;
             int push_signal(const std::string &signal_name,
                             int domain_type,
                             int domain_idx) override;
@@ -113,12 +117,13 @@ namespace geopm
             void register_msr_control(const std::string &control_name);
             static std::string plugin_name(void);
             static std::unique_ptr<IOGroup> make_plugin(void);
-        protected:
+        private:
             void register_msr_signal(const std::string &signal_name, const std::string &msr_field_name);
             void register_msr_control(const std::string &control_name, const std::string &msr_field_name);
 
             /// @brief Configure memory for all pushed signals and controls.
             void activate(void);
+            IPlatformTopo &m_platform_topo;
             int m_num_cpu;
             bool m_is_active;
             bool m_is_read;

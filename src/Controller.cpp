@@ -84,7 +84,10 @@
 #include "PlatformTopo.hpp"
 #include "RuntimeRegulator.hpp"
 #include "ProfileIOGroup.hpp"
+#include "ProfileIORuntime.hpp"
 #include "ProfileIOSample.hpp"
+#include "Helper.hpp"
+#include "Kontroller.hpp"
 #include "config.h"
 
 #ifdef GEOPM_HAS_XMMINTRIN
@@ -109,24 +112,29 @@ extern "C"
     {
         int err = 0;
         try {
-            if (policy_config) {
-                std::string policy_config_str(policy_config);
-                geopm::IGlobalPolicy *policy = new geopm::GlobalPolicy(policy_config_str, "");
-                auto tmp_comm = geopm::comm_factory().make_plugin(geopm_env_comm());
-                geopm::Controller ctl(policy, std::move(tmp_comm));
+            auto tmp_comm = geopm::comm_factory().make_plugin(geopm_env_comm());
+            if (geopm_env_do_kontroller()) {
+                geopm::Kontroller ctl(std::move(tmp_comm), geopm_env_policy());
                 err = geopm_ctl_run((struct geopm_ctl_c *)&ctl);
-                delete policy;
             }
-            //The null case is for all nodes except rank 0.
-            //These controllers should assume their policy from the master.
             else {
-                auto tmp_comm = geopm::comm_factory().make_plugin(geopm_env_comm());
-                geopm::Controller ctl(NULL, std::move(tmp_comm));
-                err = geopm_ctl_run((struct geopm_ctl_c *)&ctl);
+                if (policy_config) {
+                    std::string policy_config_str(policy_config);
+                    geopm::IGlobalPolicy *policy = new geopm::GlobalPolicy(policy_config_str, "");
+                    geopm::Controller ctl(policy, std::move(tmp_comm));
+                    err = geopm_ctl_run((struct geopm_ctl_c *)&ctl);
+                    delete policy;
+                }
+                //The null case is for all nodes except rank 0.
+                //These controllers should assume their policy from the master.
+                else {
+                    geopm::Controller ctl(NULL, std::move(tmp_comm));
+                    err = geopm_ctl_run((struct geopm_ctl_c *)&ctl);
+                }
             }
         }
         catch (...) {
-            err = geopm::exception_handler(std::current_exception());
+            err = geopm::exception_handler(std::current_exception(), true);
         }
         return err;
     }
@@ -134,12 +142,23 @@ extern "C"
     int geopm_ctl_destroy(struct geopm_ctl_c *ctl)
     {
         int err = 0;
-        geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
-        try {
-            delete ctl_obj;
+        if (geopm_env_do_kontroller()) {
+            geopm::Kontroller *ctl_obj = (geopm::Kontroller *)ctl;
+            try {
+                delete ctl_obj;
+            }
+            catch (...) {
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
-        catch (...) {
-            err = geopm::exception_handler(std::current_exception());
+        else {
+            geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
+            try {
+                delete ctl_obj;
+            }
+            catch (...) {
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
         return err;
     }
@@ -147,13 +166,26 @@ extern "C"
     int geopm_ctl_run(struct geopm_ctl_c *ctl)
     {
         int err = 0;
-        geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
-        try {
-            ctl_obj->run();
+        if (geopm_env_do_kontroller()) {
+            geopm::Kontroller *ctl_obj = (geopm::Kontroller *)ctl;
+            try {
+                ctl_obj->run();
+            }
+            catch (...) {
+                /// @todo need this feature to be added to the Kontroller.
+                //ctl_obj->reset();
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
-        catch (...) {
-            ctl_obj->reset();
-            err = geopm::exception_handler(std::current_exception());
+        else {
+            geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
+            try {
+                ctl_obj->run();
+            }
+            catch (...) {
+                ctl_obj->reset();
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
         return err;
     }
@@ -166,7 +198,7 @@ extern "C"
             ctl_obj->step();
         }
         catch (...) {
-            err = geopm::exception_handler(std::current_exception());
+            err = geopm::exception_handler(std::current_exception(), true);
         }
         return err;
     }
@@ -176,12 +208,23 @@ extern "C"
                           pthread_t *thread)
     {
         long err = 0;
-        geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
-        try {
-            ctl_obj->pthread(attr, thread);
+        if (geopm_env_do_kontroller()) {
+            geopm::Kontroller *ctl_obj = (geopm::Kontroller *)ctl;
+            try {
+                ctl_obj->pthread(attr, thread);
+            }
+            catch (...) {
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
-        catch (...) {
-            err = geopm::exception_handler(std::current_exception());
+        else {
+            geopm::Controller *ctl_obj = (geopm::Controller *)ctl;
+            try {
+                ctl_obj->pthread(attr, thread);
+            }
+            catch (...) {
+                err = geopm::exception_handler(std::current_exception(), true);
+            }
         }
         return err;
     }
@@ -285,6 +328,8 @@ namespace geopm
                 }
             }
             m_ppn1_comm->broadcast(&plugin_desc, sizeof(plugin_desc), 0);
+            // to be used by init_decider()
+            m_plugin_desc = plugin_desc;
 
             if (num_nodes > 1) {
                 int num_fan_out = 1;
@@ -341,9 +386,6 @@ namespace geopm
             m_platform->bound(upper_bound, lower_bound);
             m_throttle_limit_mhz = m_platform->throttle_limit_mhz();
 
-            m_decider[0] = decider_factory().make_plugin(plugin_desc.leaf_decider);
-            m_decider[0]->bound(upper_bound, lower_bound);
-
             int num_domain = m_platform->num_control_domain();
             m_telemetry_sample.resize(num_domain, {0, {{0, 0}}, {0}});
             m_policy[0] = new Policy(num_domain);
@@ -364,17 +406,12 @@ namespace geopm
                                                    num_domain,
                                                    level,
                                                    NULL)));
-                m_decider[level] = decider_factory().make_plugin(plugin_desc.tree_decider);
-                m_decider[level]->bound(upper_bound, lower_bound);
-                upper_bound *= num_domain;
-                lower_bound *= num_domain;
                 num_domain = m_tree_comm->level_size(level);
                 if (num_domain > m_max_fanout) {
                     m_max_fanout = num_domain;
                 }
             }
 
-            platform_io().read_batch();
             m_platform->sample(m_msr_sample);
             m_app_start_time = m_msr_sample[0].timestamp;
             for (auto it = m_msr_sample.begin(); it != m_msr_sample.end(); ++it) {
@@ -440,18 +477,40 @@ namespace geopm
         }
 
         if (!m_is_connected) {
-            m_sampler->initialize(m_rank_per_node);
+            m_sampler->initialize();
+            m_rank_per_node = m_sampler->rank_per_node();
             m_num_mpi_enter.resize(m_rank_per_node, 0);
             m_mpi_enter_time.resize(m_rank_per_node, {{0,0}});
             m_prof_sample.resize(m_sampler->capacity());
-            std::vector<int> cpu_rank;
-            m_sampler->cpu_rank(cpu_rank);
+            std::vector<int> cpu_rank = m_sampler->cpu_rank();
             m_platform->init_transform(cpu_rank);
             m_sample_regulator = new SampleRegulator(cpu_rank);
             m_profile_io_sample = std::make_shared<ProfileIOSample>(cpu_rank);
-            std::unique_ptr<ProfileIOGroup> tmp_piog(new ProfileIOGroup(m_profile_io_sample));
-            platform_io().register_iogroup(std::move(tmp_piog));
+            m_profile_io_runtime = std::make_shared<ProfileIORuntime>(cpu_rank);
+            platform_io().register_iogroup(geopm::make_unique<ProfileIOGroup>(m_profile_io_sample,
+                                                                              m_profile_io_runtime));
             m_is_connected = true;
+        }
+    }
+
+    void Controller::init_decider(void)
+    {
+        double upper_bound;
+        double lower_bound;
+        m_platform->bound(upper_bound, lower_bound);
+        int num_domain = m_platform->num_control_domain();
+        int num_level = m_tree_comm->num_level();
+
+        m_decider[0] = decider_factory().make_plugin(m_plugin_desc.leaf_decider);
+        m_decider[0]->bound(upper_bound, lower_bound);
+
+        for (int level = 1; level < num_level; ++level) {
+            /// @todo Seems strange that level 0 and level 1 have the same bounds
+            m_decider[level] = decider_factory().make_plugin(m_plugin_desc.tree_decider);
+            m_decider[level]->bound(upper_bound, lower_bound);
+            upper_bound *= num_domain;
+            lower_bound *= num_domain;
+            num_domain = m_tree_comm->level_size(level);
         }
     }
 
@@ -464,6 +523,10 @@ namespace geopm
         geopm_signal_handler_register();
 
         connect();
+        init_decider();
+        m_sampler->controller_ready();
+
+        platform_io().read_batch();
 
         geopm_signal_handler_check();
 
@@ -656,6 +719,10 @@ namespace geopm
                                 auto rid_it = m_rid_regulator_map.emplace(std::piecewise_construct,
                                                                           std::make_tuple(base_region_id),
                                                                           std::make_tuple(m_rank_per_node));
+                                // Add new regulator to ProfileIO
+                                if (rid_it.second) {
+                                    m_profile_io_runtime->insert_regulator(base_region_id, rid_it.first->second);
+                                }
                                 rid_it.first->second.record_entry(local_rank, (*sample_it).second.timestamp);
                             }
                             else if ((*sample_it).second.progress == 1.0 &&
@@ -965,9 +1032,9 @@ namespace geopm
                 energy_exit += it->signal;
             }
         }
-        m_sampler->report_name(report_name);
-        m_sampler->profile_name(profile_name);
-        m_sampler->name_set(region_name);
+        report_name = m_sampler->report_name();
+        profile_name = m_sampler->profile_name();
+        region_name = m_sampler->name_set();
 
         if (report_name.empty() || profile_name.empty()) {
             throw Exception("Controller::generate_report(): Invalid report data", GEOPM_ERROR_INVALID, __FILE__, __LINE__);

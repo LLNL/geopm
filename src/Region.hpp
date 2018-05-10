@@ -37,6 +37,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <memory>
 
 #include "geopm_message.h"
 
@@ -51,8 +52,8 @@ namespace geopm
     class IRegion
     {
         public:
-            IRegion() {}
-            virtual ~IRegion() {}
+            IRegion() = default;
+            virtual ~IRegion() = default;
             /// @brief Record an entry into the region.
             virtual void entry(void) = 0;
             /// @brief Return the number of entries into the region.
@@ -241,7 +242,7 @@ namespace geopm
             /// @brief Default constructor.
             /// @param [in] identifier Unique 64 bit region identifier.
             /// @param [in] num_domain Number of control domains.
-            Region(uint64_t identifier, int num_domain, int level, IProfileThreadTable *tprof_table);
+            Region(uint64_t identifier, int num_domain, int level, std::shared_ptr<IProfileThreadTable> tprof_table);
             /// @brief Default destructor.
             virtual ~Region();
             void entry(void) override;
@@ -265,7 +266,7 @@ namespace geopm
             void report(std::ostringstream &string_stream, const std::string &name, int rank_per_node) const override;
             void thread_progress(std::vector<double> &progress) override;
             struct geopm_time_s telemetry_timestamp(size_t sample_idx) override;
-        protected:
+        private:
             /// @brief Bound testing of input parameters.
             ///
             /// Checks the requested domain index and signal type to make sure they are within
@@ -313,9 +314,9 @@ namespace geopm
             /// @brief Holder for sample data calculated after a domain exits a region.
             std::vector<struct geopm_sample_message_s> m_domain_sample;
             /// @brief Circular buffer is over time, vector is indexed over both domains and signals.
-            ICircularBuffer<std::vector<double> > *m_domain_buffer;
+            std::unique_ptr<ICircularBuffer<std::vector<double> > > m_domain_buffer;
             /// @brief time stamp for each entry in the m_domain_buffer.
-            ICircularBuffer<struct geopm_time_s> *m_time_buffer;
+            std::unique_ptr<ICircularBuffer<struct geopm_time_s> > m_time_buffer;
             /// @brief the number of valid samples per domain and signal type.
             std::vector<int> m_valid_entries;
             /// @brief the current minimum signal value per domain and signal type.
@@ -332,7 +333,7 @@ namespace geopm
             std::vector<bool> m_is_entered;
             int m_derivative_num_fit;
             double m_mpi_time;
-            IProfileThreadTable *m_tprof_table;
+            std::shared_ptr<IProfileThreadTable> m_tprof_table;
     };
 }
 

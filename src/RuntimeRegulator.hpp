@@ -41,18 +41,28 @@
 
 namespace geopm
 {
-    class RuntimeRegulator
+    class IRuntimeRegulator
     {
         public:
-            RuntimeRegulator(void);
+            IRuntimeRegulator() = default;
+            virtual ~IRuntimeRegulator() = default;
+            virtual void record_entry(int rank, struct geopm_time_s entry_time) = 0;
+            virtual void record_exit(int rank, struct geopm_time_s exit_time) = 0;
+            virtual void insert_runtime_signal(std::vector<struct geopm_telemetry_message_s> &telemetry) = 0;
+            virtual std::vector<double> runtimes(void) const = 0;
+    };
+    class RuntimeRegulator : public IRuntimeRegulator
+    {
+        public:
+            RuntimeRegulator();
             RuntimeRegulator(int max_rank_count);
-            virtual ~RuntimeRegulator();
-            void record_entry(int rank, struct geopm_time_s entry_time);
-            void record_exit(int rank, struct geopm_time_s exit_time);
-            void insert_runtime_signal(std::vector<struct geopm_telemetry_message_s> &telemetry);
-            std::vector<double> runtimes();
+            virtual ~RuntimeRegulator() = default;
+            void record_entry(int rank, struct geopm_time_s entry_time) override;
+            void record_exit(int rank, struct geopm_time_s exit_time) override;
+            void insert_runtime_signal(std::vector<struct geopm_telemetry_message_s> &telemetry) override;
+            std::vector<double> runtimes(void) const override;
 
-        protected:
+        private:
             void update_average(void);
             const struct geopm_time_s M_TIME_ZERO;
             enum m_num_rank_signal_e {

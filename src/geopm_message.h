@@ -45,6 +45,7 @@
 #include <pthread.h>
 #include <stdint.h>
 
+#include "geopm.h"
 #include "geopm_time.h"
 
 #ifdef __cplusplus
@@ -101,6 +102,11 @@ static inline uint64_t geopm_region_id_unset_mpi(uint64_t rid)
     return (rid & (~GEOPM_REGION_ID_MPI));
 }
 
+static inline uint64_t geopm_region_id_hint(uint64_t rid)
+{
+    return (rid & GEOPM_MASK_REGION_HINT);
+}
+
 static inline int geopm_region_id_hint_is_equal(uint64_t hint_type, uint64_t rid)
 {
     return (rid & hint_type) ? 1 : 0;
@@ -109,6 +115,11 @@ static inline int geopm_region_id_hint_is_equal(uint64_t hint_type, uint64_t rid
 static inline uint64_t geopm_region_id_set_hint(uint64_t hint_type, uint64_t rid)
 {
     return (rid | hint_type);
+}
+
+static inline uint64_t geopm_region_id_unset_hint(uint64_t hint_type, uint64_t rid)
+{
+    return (rid & (~hint_type));
 }
 
 enum geopm_control_e {
@@ -172,6 +183,15 @@ struct geopm_prof_message_s {
     struct geopm_time_s timestamp;
     /// @brief Progress of the rank within the current region.
     double progress;
+};
+
+/// @brief Used to pass information about regions entered and exited
+/// from the application to the tracer.
+struct geopm_region_info_s
+{
+    uint64_t region_id;
+    double progress;
+    double runtime;
 };
 
 /// @brief Structure used to hold MSR telemetry data

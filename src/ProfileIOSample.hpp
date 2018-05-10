@@ -45,8 +45,8 @@ namespace geopm
     class IProfileIOSample
     {
         public:
-            IProfileIOSample() {}
-            virtual ~IProfileIOSample() {}
+            IProfileIOSample() = default;
+            virtual ~IProfileIOSample() = default;
             virtual void update(std::vector<std::pair<uint64_t, struct geopm_prof_message_s> >::const_iterator prof_sample_begin,
                                 std::vector<std::pair<uint64_t, struct geopm_prof_message_s> >::const_iterator prof_sample_end) = 0;
             virtual std::vector<uint64_t> per_cpu_region_id(void) = 0;
@@ -67,7 +67,7 @@ namespace geopm
                 struct geopm_time_s timestamp;
                 double progress;
             };
-           enum m_interp_type_e {
+            enum m_interp_type_e {
                 M_INTERP_TYPE_NONE = 0,
                 M_INTERP_TYPE_NEAREST = 1,
                 M_INTERP_TYPE_LINEAR = 2,
@@ -75,6 +75,7 @@ namespace geopm
             std::vector<double> per_rank_progress(const struct geopm_time_s &extrapolation_time);
             /// @brief Number of ranks running on the node.
             size_t m_num_rank;
+            /// @brief The rank index of the rank running on each CPU.
             std::vector<int> m_cpu_rank;
             /// @brief A map from the MPI rank reported in the
             ///        ProfileSampler data to the node local rank

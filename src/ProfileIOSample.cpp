@@ -33,41 +33,24 @@
 #include <set>
 
 #include "ProfileIOSample.hpp"
+#include "ProfileIO.hpp"
 #include "CircularBuffer.hpp"
 #include "config.h"
 
 namespace geopm
 {
     ProfileIOSample::ProfileIOSample(const std::vector<int> &cpu_rank)
-        : m_num_rank(0)
-        , m_cpu_rank(cpu_rank)
     {
-        std::set<int> rank_set;
-        for (auto it : cpu_rank) {
-            if (it != -1) {
-                rank_set.insert(it);
-            }
-        }
-        m_num_rank = rank_set.size();
-        int i = 0;
-        for (auto it : rank_set) {
-            m_rank_idx_map.insert(std::pair<int, int>(it, i));
-            ++i;
-        }
-        for (auto &rank_it : m_cpu_rank) {
-            auto node_local_rank_it = m_rank_idx_map.find(rank_it);
-            rank_it = node_local_rank_it->second;
-        }
+        m_rank_idx_map = ProfileIO::rank_to_node_local_rank(cpu_rank);
+        m_cpu_rank = ProfileIO::rank_to_node_local_rank_per_cpu(cpu_rank);
+        m_num_rank = m_rank_idx_map.size();
 
         // 2 samples for linear interpolation
         m_rank_sample_buffer.resize(m_num_rank, CircularBuffer<struct m_rank_sample_s>(2));
         m_region_id.resize(m_num_rank, GEOPM_REGION_ID_UNMARKED);
     }
 
-    ProfileIOSample::~ProfileIOSample()
-    {
-
-    }
+    ProfileIOSample::~ProfileIOSample() = default;
 
     void ProfileIOSample::update(std::vector<std::pair<uint64_t, struct geopm_prof_message_s> >::const_iterator prof_sample_begin,
                                  std::vector<std::pair<uint64_t, struct geopm_prof_message_s> >::const_iterator prof_sample_end)
@@ -173,8 +156,8 @@ namespace geopm
     {
         std::vector<uint64_t> result(m_cpu_rank.size(), GEOPM_REGION_ID_UNMARKED);
         int cpu_idx = 0;
-        for (auto it : m_cpu_rank) {
-            result[cpu_idx] = m_region_id[it];
+        for (auto rank : m_cpu_rank) {
+            result[cpu_idx] = m_region_id[rank];
             ++cpu_idx;
         }
         return result;

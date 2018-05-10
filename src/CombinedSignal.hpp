@@ -34,29 +34,38 @@
 #define COMBINEDSIGNAL_HPP_INCLUDE
 
 #include <map>
+#include <functional>
+#include <vector>
 
 #include "CircularBuffer.hpp"
 
 
 namespace geopm
 {
+    /// @brief Used by PlatformIO to define a signal as a function of
+    ///        other signals.
     class CombinedSignal
     {
         public:
-            CombinedSignal() = default;
+            CombinedSignal();
+            CombinedSignal(std::function<double(const std::vector<double> &)>);
             virtual ~CombinedSignal() = default;
+            /// @brief Sample all required signals and aggregate
+            ///        values to produce the combined signal.
             virtual double sample(const std::vector<double> &values);
+            std::function<double(const std::vector<double> &)> m_agg_function;
     };
 
+    /// @brief Used by PlatformIO for CombinedSignals based on a
+    ///        derivative of another signal over time.
     class PerRegionDerivativeCombinedSignal : public CombinedSignal
     {
         public:
             PerRegionDerivativeCombinedSignal() = default;
             virtual ~PerRegionDerivativeCombinedSignal() = default;
             double sample(const std::vector<double> &values) override;
-        protected:
-            struct m_sample_s
-            {
+        private:
+            struct m_sample_s {
                 double time;
                 double sample;
             };
